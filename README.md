@@ -6,7 +6,7 @@ Download automático dos XMLs de NF-e no portal da Sefaz Goiás e painel de cont
 
 - **web/**: site com painel geral (admin), painel por escritório, cadastro de empresas e acompanhamento das entregas
 - **supabase/**: banco de dados, autenticação e regras de acesso (cada escritório vê só as suas empresas)
-- **robo/**: rotina que entra na Sefaz-GO, baixa os XMLs (entrada e saída) por empresa e registra o resultado no painel
+- **robo/**: programa que roda no PC do escritório (Python + Chrome), entra na Sefaz-GO, baixa os XMLs (entrada e saída) por empresa e registra o resultado no painel. Instalação em `robo/LEIA-ME.md`
 
 ## Fluxo da Sefaz-GO (manual, hoje)
 

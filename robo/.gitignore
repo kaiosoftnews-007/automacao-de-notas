@@ -1,0 +1,6 @@
+.env
+.venv/
+perfil-chrome/
+diagnostico/
+robo.log*
+__pycache__/
