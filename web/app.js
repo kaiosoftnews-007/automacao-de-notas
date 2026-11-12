@@ -57,6 +57,34 @@ async function q(promise) {
 }
 const eAdmin = () => st.perfil?.papel === 'admin';
 
+// Janela para editar os dados do escritório. Devolve true se salvou.
+function editarEscritorio(es) {
+  return new Promise(resolve => {
+    const fundo = document.createElement('div');
+    fundo.className = 'modal-fundo';
+    fundo.innerHTML = `<form class="card modal" role="dialog" aria-modal="true" aria-labelledby="et">
+      <h2 id="et" style="font-size:18px">Editar escritório</h2>
+      <label class="f">Nome<input name="nome" required value="${h(es.nome)}"></label>
+      <label class="f">CNPJ<input name="cnpj" value="${h(es.cnpj)}"></label>
+      <label class="f">E-mail de contato<input name="email_contato" type="email" value="${h(es.email_contato)}"></label>
+      <div class="sub">O login da Sefaz desse escritório fica em <a href="#/acesso?esc=${es.id}">Acesso à Sefaz</a>.</div>
+      <div style="display:flex;gap:10px;justify-content:flex-end"><button type="button" class="btn" id="ecanc">Cancelar</button><button type="submit" class="btn p">Salvar</button></div>
+    </form>`;
+    document.body.appendChild(fundo);
+    const form = fundo.querySelector('form'); form.nome.focus();
+    const fechar = ok => { fundo.remove(); resolve(ok); };
+    fundo.querySelector('#ecanc').onclick = () => fechar(false);
+    fundo.querySelector('a').onclick = () => fechar(false);
+    fundo.onclick = e => { if (e.target === fundo) fechar(false); };
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      await q(sb.from('escritorios').update({ nome: fd.get('nome').trim(), cnpj: fd.get('cnpj') || null, email_contato: fd.get('email_contato') || null }).eq('id', es.id));
+      toast('Escritório atualizado.'); fechar(true);
+    };
+  });
+}
+
 // Pede a senha de quem está logado antes de uma exclusão. Devolve true só se a senha estiver certa.
 function confirmarComSenha(titulo, texto) {
   return new Promise(resolve => {
@@ -340,9 +368,9 @@ async function telaEscritorios() {
   await layout('escritorios', `
     <div class="top"><div><div class="sub">Clientes contadores</div><h1>Escritórios</h1></div></div>
     <section class="cols">
-      <div class="card tbl-wrap">${escs.length ? `<table class="tbl"><thead><tr><th>Escritório</th><th>CNPJ</th><th class="c">Empresas</th><th>Acesso Sefaz</th></tr></thead><tbody>
+      <div class="card tbl-wrap">${escs.length ? `<table class="tbl"><thead><tr><th>Escritório</th><th>CNPJ</th><th class="c">Empresas</th><th>Acesso Sefaz</th><th></th></tr></thead><tbody>
         ${escs.map(e => `<tr class="click" data-href="#/escritorio/${e.id}"><td><a href="#/escritorio/${e.id}" style="font-weight:600">${h(e.nome)}</a></td><td>${h(e.cnpj || '—')}</td>
-          <td class="c">${emps.filter(x => x.escritorio_id === e.id).length}</td><td>${pillSefaz(sit[e.id])}</td></tr>`).join('')}
+          <td class="c">${emps.filter(x => x.escritorio_id === e.id).length}</td><td>${pillSefaz(sit[e.id])}</td><td style="text-align:right"><button type="button" class="btn s" data-editar="${e.id}">Editar</button></td></tr>`).join('')}
       </tbody></table>` : '<div class="empty">Nenhum escritório cadastrado ainda.</div>'}</div>
       <form class="card pad" id="novo" style="display:flex;flex-direction:column;gap:14px">
         <h2>Novo escritório</h2>
@@ -352,7 +380,10 @@ async function telaEscritorios() {
         <button class="btn p" type="submit">Cadastrar</button>
       </form>
     </section>`);
-  $$('tr.click').forEach(tr => tr.onclick = ev => { if (ev.target.tagName !== 'A') go(tr.dataset.href); });
+  $$('tr.click').forEach(tr => tr.onclick = ev => { if (!['A', 'BUTTON'].includes(ev.target.tagName)) go(tr.dataset.href); });
+  $$('[data-editar]').forEach(bt => bt.onclick = async () => {
+    if (await editarEscritorio(escs.find(e => e.id === bt.dataset.editar))) telaEscritorios();
+  });
   $('#novo').onsubmit = async e => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(e.target));
@@ -377,9 +408,9 @@ async function telaEscritorio(id, aba = 'empresas') {
   }
   let corpo = '';
   if (aba === 'empresas') {
-    corpo = `<div class="card tbl-wrap">${b.empresas.length ? `<table class="tbl"><thead><tr><th>Cód.</th><th>Empresa</th><th>IE</th><th>CNPJ</th><th>Regime</th><th class="c">Entrada</th><th class="c">Saída</th><th>Download</th></tr></thead><tbody>
+    corpo = `<div class="card tbl-wrap">${b.empresas.length ? `<table class="tbl"><thead><tr><th>Cód.</th><th>Empresa</th><th>IE</th><th>CNPJ</th><th>Regime</th><th class="c">Entrada</th><th class="c">Saída</th><th>Download</th><th></th></tr></thead><tbody>
       ${b.empresas.map(e => { const [c, l] = statusDownload(b, e); return `<tr class="click" data-href="#/empresa/${e.id}"><td>${h(e.codigo || '')}</td><td style="font-weight:600">${h(e.razao_social)}</td><td>${h(e.ie || '—')}</td><td>${h(e.cnpj || '—')}</td><td>${REGIMES[e.regime] || '—'}</td>
-        <td class="c">${qtd(b, e, 'entrada') ?? '—'}</td><td class="c">${qtd(b, e, 'saida') ?? '—'}</td><td><span class="pill ${c}">${l}</span></td></tr>`; }).join('')}
+        <td class="c">${qtd(b, e, 'entrada') ?? '—'}</td><td class="c">${qtd(b, e, 'saida') ?? '—'}</td><td><span class="pill ${c}">${l}</span></td><td style="text-align:right"><a class="btn s" href="#/empresa/${e.id}" style="display:inline-flex;align-items:center;text-decoration:none">Editar</a></td></tr>`; }).join('')}
       </tbody></table>` : `<div class="empty">Nenhuma empresa ainda. <a href="#/empresa/novo?esc=${id}">Cadastre</a> ou importe sua planilha.</div>`}</div>`;
   } else if (aba === 'downloads') {
     const dls = await q(sb.from('downloads').select('*, empresas(razao_social)').eq('escritorio_id', id).order('atualizado_em', { ascending: false }).limit(100));
@@ -411,7 +442,7 @@ async function telaEscritorio(id, aba = 'empresas') {
         <a class="btn" href="#/rotina/${id}" style="display:inline-flex;align-items:center;text-decoration:none">Rotina</a>
         <button type="button" class="btn" id="baixar">Baixar agora</button>
         <a class="btn p" href="#/empresa/novo?esc=${id}" style="display:inline-flex;align-items:center;text-decoration:none">+ Nova empresa</a>
-        ${eAdmin() ? '<button type="button" class="btn del-o" id="excluirEsc">Excluir escritório</button>' : ''}
+        ${eAdmin() ? '<button type="button" class="btn" id="editarEsc">Editar escritório</button><button type="button" class="btn del-o" id="excluirEsc">Excluir escritório</button>' : ''}
       </div>
     </div>
     <section class="kpis">
@@ -430,6 +461,9 @@ async function telaEscritorio(id, aba = 'empresas') {
   $$('[data-aba]').forEach(t => t.onclick = () => telaEscritorio(id, t.dataset.aba));
   $$('tr.click').forEach(tr => tr.onclick = () => go(tr.dataset.href));
   $('#baixar').onclick = () => pedirExecucao(id);
+  if ($('#editarEsc')) $('#editarEsc').onclick = async () => {
+    if (await editarEscritorio(es)) telaEscritorio(id, aba);
+  };
   if ($('#excluirEsc')) $('#excluirEsc').onclick = async () => {
     const ok = await confirmarComSenha(`Excluir ${es.nome}?`, `Apaga o escritório, as ${b.empresas.length} empresas dele, o histórico de downloads, as entregas, os alertas e a senha da Sefaz. Não tem como desfazer. Os XMLs já salvos no computador continuam lá.`);
     if (!ok) return;
