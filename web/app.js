@@ -517,7 +517,13 @@ async function telaEmpresa(id, params) {
             <div style="display:flex;flex-direction:column;gap:12px">
             <label class="f">Modelo da NF-e<select name="modelo"><option value="todos" ${sel('todos', emp.modelo)}>Todos</option><option value="55" ${sel('55', emp.modelo)}>55 (NF-e)</option><option value="65" ${sel('65', emp.modelo)}>65 (NFC-e)</option></select></label>
             <label class="f">Notas canceladas<select name="exibir_canceladas"><option value="false">Não exibir</option><option value="true" ${emp.exibir_canceladas ? 'selected' : ''}>Exibir</option></select></label></div></div>
-          <div class="mono">${h(rot?.pasta_destino || 'C:\\Notas')}\\${h(emp.codigo ? emp.codigo + ' - ' : '')}${h(emp.razao_social || '[empresa]')}\\AAAA-MM\\Entrada</div>
+          <div class="f">Onde as notas vão ficar no computador
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <div class="mono" style="flex:1;min-width:220px">${h(rot?.pasta_destino || 'C:\\Notas')}\\${h(emp.codigo ? emp.codigo + ' - ' : '')}${h(emp.razao_social || '[empresa]')}\\AAAA-MM\\Entrada</div>
+              <a class="btn o s" href="#/rotina/${emp.escritorio_id}" style="display:inline-flex;align-items:center;text-decoration:none">Alterar pasta</a>
+            </div>
+            <span class="sub" style="font-weight:400">A pasta principal vale para todas as empresas do escritório. O robô cria sozinho as subpastas de cada empresa e mês.</span>
+          </div>
         </section>
         <section class="card pad" style="display:flex;flex-direction:column;gap:8px">
           <h2>Entregas que essa empresa tem</h2>
