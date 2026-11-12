@@ -484,10 +484,11 @@ async function telaEscritorio(id, aba = 'empresas') {
 async function telaEmpresa(id, params) {
   const nova = id === 'novo';
   const [empBanco, escs, rotinas] = await Promise.all([
-    nova ? null : q(sb.from('empresas').select('*').eq('id', id).single()),
+    nova ? null : q(sb.from('empresas').select('*').eq('id', id).maybeSingle()),
     q(sb.from('escritorios').select('id,nome').order('nome')),
     q(sb.from('rotinas').select('escritorio_id,pasta_destino')),
   ]);
+  if (!nova && !empBanco) return naoEncontrado('Empresa não encontrada', 'Ela pode ter sido excluída, ou o link está desatualizado.');
   const emp = empBanco || { escritorio_id: params.get('esc') || st.perfil.escritorio_id, uf: 'GO', baixar_entrada: true, baixar_saida: true, incluir_eventos: true, modelo: 'todos', exibir_canceladas: false, obrigacoes: ['impt_nfs', 'apuracao'] };
   const es = escs.find(e => e.id === emp.escritorio_id);
   const rot = rotinas.find(r => r.escritorio_id === emp.escritorio_id);
@@ -691,10 +692,11 @@ async function telaAcesso(params) {
 // ---------- rotina ----------
 async function telaRotina(id) {
   const [es, rot, exes] = await Promise.all([
-    q(sb.from('escritorios').select('id,nome').eq('id', id).single()),
+    q(sb.from('escritorios').select('id,nome').eq('id', id).maybeSingle()),
     q(sb.from('rotinas').select('*').eq('escritorio_id', id).maybeSingle()),
     q(sb.from('execucoes').select('*').eq('escritorio_id', id).order('solicitada_em', { ascending: false }).limit(1)),
   ]);
+  if (!es) return naoEncontrado('Escritório não encontrado', 'Abra a rotina pela página do escritório.');
   const r = rot || { dias_semana: [1, 2, 3, 4, 5], horario: '06:00', periodo: 'mes_anterior', pasta_destino: 'C:\\Notas', tentativas: 3, avisar_email: true, resumo_diario: true, avisar_whatsapp: false, ativa: true };
   const ult = exes[0];
   const dls = ult ? await q(sb.from('downloads').select('*, empresas(razao_social,ie)').eq('execucao_id', ult.id).order('empresa_id')) : [];
@@ -741,6 +743,11 @@ async function telaRotina(id) {
   };
 }
 
+function naoEncontrado(titulo, texto) {
+  return layout('', `<div class="card pad" style="max-width:520px;display:flex;flex-direction:column;gap:12px"><h2>${h(titulo)}</h2><div class="sub">${h(texto)}</div>
+    <a class="btn p" href="${eAdmin() ? '#/escritorios' : '#/'}" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none">Voltar</a></div>`);
+}
+
 // ---------- roteador ----------
 async function rota() {
   if (!st.session) return telaLogin();
@@ -767,7 +774,10 @@ async function rota() {
     if (p[0] === 'acesso') return await telaAcesso(params);
     if (p[0] === 'rotina' && p[1]) return await telaRotina(p[1]);
     go('#/');
-  } catch (e) { console.error(e); }
+  } catch (e) {
+    console.error(e);
+    try { await naoEncontrado('Não foi possível abrir esta tela', 'Erro: ' + (e?.message || e) + ' · tela: ' + location.hash); } catch (_) {}
+  }
 }
 
 window.addEventListener('hashchange', rota);
