@@ -1,0 +1,6 @@
+{
+  // Site estático publicado no Cloudflare (Workers com assets): serve a pasta web/
+  "name": "automacao-de-notas",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "./web" }
+}

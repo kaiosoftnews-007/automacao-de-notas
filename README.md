@@ -18,8 +18,8 @@ Download automático dos XMLs de NF-e no portal da Sefaz Goiás e painel de cont
 
 ## Publicar o site (Cloudflare Pages)
 
-1. Cloudflare → Workers & Pages → Create → Pages → Connect to Git → escolher `automacao-de-notas`
-2. Build command: deixar vazio · Build output directory: `web`
+1. Cloudflare → Workers & Pages → Create → importar o repositório `automacao-de-notas`
+2. Comando da build: vazio · Comando de implantação: `npx wrangler deploy` (lê o `wrangler.jsonc`, que publica a pasta `web`)
 3. Cada push na branch `main` publica sozinho
 
 ## Banco (Supabase)
