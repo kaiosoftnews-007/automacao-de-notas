@@ -108,7 +108,9 @@ function telaLogin(erro = '') {
     e.preventDefault();
     const fd = new FormData(e.target);
     const { error } = await sb.auth.signInWithPassword({ email: fd.get('email'), password: fd.get('senha') });
-    if (error) telaLogin('E-mail ou senha incorretos.');
+    if (error) telaLogin(error.code === 'email_not_confirmed' || /not confirmed/i.test(error.message)
+      ? 'Esse login ainda não foi confirmado. No Supabase, em Authentication → Users, confirme o usuário (ou crie de novo marcando Auto Confirm User).'
+      : 'E-mail ou senha incorretos. Se o login ainda não existe, ele precisa ser criado no Supabase (Authentication → Users → Add user).');
   };
   $('#esqueci').onclick = async () => {
     const email = $('[name=email]').value;
