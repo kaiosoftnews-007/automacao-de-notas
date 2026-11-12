@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -56,14 +56,58 @@ async function q(promise) {
   return data;
 }
 const eAdmin = () => st.perfil?.papel === 'admin';
+
+// Pede a senha de quem está logado antes de uma exclusão. Devolve true só se a senha estiver certa.
+function confirmarComSenha(titulo, texto) {
+  return new Promise(resolve => {
+    const fundo = document.createElement('div');
+    fundo.className = 'modal-fundo';
+    fundo.innerHTML = `<form class="card modal" role="dialog" aria-modal="true" aria-labelledby="mt">
+      <h2 id="mt" style="font-size:18px">${h(titulo)}</h2>
+      <div class="msg err">${h(texto)}</div>
+      <label class="f">Digite sua senha para confirmar<input type="password" name="senha" required autocomplete="current-password"></label>
+      <div class="sub" id="merr" style="color:#9B1C12"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end"><button type="button" class="btn" id="mcanc">Cancelar</button><button type="submit" class="btn del">Excluir</button></div>
+    </form>`;
+    document.body.appendChild(fundo);
+    const form = fundo.querySelector('form'), inp = form.senha;
+    inp.focus();
+    const fechar = ok => { fundo.remove(); resolve(ok); };
+    fundo.querySelector('#mcanc').onclick = () => fechar(false);
+    fundo.onclick = e => { if (e.target === fundo) fechar(false); };
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const bt = form.querySelector('.del'); bt.disabled = true; bt.textContent = 'Conferindo…';
+      st.reautenticando = true;
+      const { error } = await sb.auth.signInWithPassword({ email: st.session.user.email, password: inp.value });
+      setTimeout(() => { st.reautenticando = false; }, 500);
+      if (error) { bt.disabled = false; bt.textContent = 'Excluir'; fundo.querySelector('#merr').textContent = 'Senha incorreta.'; inp.value = ''; inp.focus(); return; }
+      fechar(true);
+    };
+  });
+}
 const go = r => { location.hash = r; };
 
 // ---------- layout ----------
-async function layout(ativo, conteudo) {
-  const [{ count }, robo] = await Promise.all([
+function carregarMenu(forcar = false) {
+  if (!forcar && st.menuP && Date.now() - st.menuEm < 60000) return st.menuP;
+  st.menuEm = Date.now();
+  st.menuP = Promise.all([
     sb.from('alertas').select('id', { count: 'exact', head: true }).is('resolvido_em', null),
     sb.from('robo_status').select('ultimo_sinal').eq('id', 'principal').maybeSingle(),
   ]);
+  return st.menuP;
+}
+
+// Troca de tela instantânea: mantém o menu e mostra "carregando" enquanto busca os dados
+function mostrarCarregando() {
+  const m = root.querySelector('main');
+  if (m) m.innerHTML = '<div class="empty" style="padding:80px">Carregando…</div>';
+  const side = root.querySelector('#side'); if (side) side.classList.remove('open');
+}
+
+async function layout(ativo, conteudo) {
+  const [{ count }, robo] = await carregarMenu();
   const online = robo.data?.ultimo_sinal && (Date.now() - new Date(robo.data.ultimo_sinal)) < 5 * 60 * 1000;
   const itens = eAdmin()
     ? [['#/', 'Painel geral', 'painel'], ['#/entregas', 'Visão de entregas', 'entregas'], ['#/escritorios', 'Escritórios', 'escritorios'],
@@ -323,10 +367,9 @@ function pillSefaz(s) {
 // ---------- escritório ----------
 async function telaEscritorio(id, aba = 'empresas') {
   if (!eAdmin() && id !== st.perfil.escritorio_id) return go('#/escritorio/' + st.perfil.escritorio_id);
-  const b = await carregarBase(id);
+  const [b, cred] = await Promise.all([carregarBase(id), q(sb.from('credenciais_sefaz').select('*').eq('escritorio_id', id).maybeSingle())]);
   const es = b.escritorios.find(e => e.id === id);
   if (!es) return layout('escritorios', '<div class="empty">Escritório não encontrado.</div>');
-  const cred = await q(sb.from('credenciais_sefaz').select('*').eq('escritorio_id', id).maybeSingle());
   let ne = 0, ns = 0, emDia = 0;
   for (const e of b.empresas) {
     ne += qtd(b, e, 'entrada') || 0; ns += qtd(b, e, 'saida') || 0;
@@ -368,6 +411,7 @@ async function telaEscritorio(id, aba = 'empresas') {
         <a class="btn" href="#/rotina/${id}" style="display:inline-flex;align-items:center;text-decoration:none">Rotina</a>
         <button type="button" class="btn" id="baixar">Baixar agora</button>
         <a class="btn p" href="#/empresa/novo?esc=${id}" style="display:inline-flex;align-items:center;text-decoration:none">+ Nova empresa</a>
+        ${eAdmin() ? '<button type="button" class="btn del-o" id="excluirEsc">Excluir escritório</button>' : ''}
       </div>
     </div>
     <section class="kpis">
@@ -386,6 +430,12 @@ async function telaEscritorio(id, aba = 'empresas') {
   $$('[data-aba]').forEach(t => t.onclick = () => telaEscritorio(id, t.dataset.aba));
   $$('tr.click').forEach(tr => tr.onclick = () => go(tr.dataset.href));
   $('#baixar').onclick = () => pedirExecucao(id);
+  if ($('#excluirEsc')) $('#excluirEsc').onclick = async () => {
+    const ok = await confirmarComSenha(`Excluir ${es.nome}?`, `Apaga o escritório, as ${b.empresas.length} empresas dele, o histórico de downloads, as entregas, os alertas e a senha da Sefaz. Não tem como desfazer. Os XMLs já salvos no computador continuam lá.`);
+    if (!ok) return;
+    await q(sb.from('escritorios').delete().eq('id', id));
+    toast('Escritório excluído.'); go('#/escritorios');
+  };
   if ($('#ligar')) $('#ligar').onclick = async () => {
     await q(sb.from('perfis').update({ escritorio_id: id }).eq('user_id', $('#livre').value));
     toast('Acesso liberado.'); telaEscritorio(id, 'usuarios');
@@ -399,11 +449,14 @@ async function telaEscritorio(id, aba = 'empresas') {
 // ---------- empresa ----------
 async function telaEmpresa(id, params) {
   const nova = id === 'novo';
-  const emp = nova ? { escritorio_id: params.get('esc') || st.perfil.escritorio_id, uf: 'GO', baixar_entrada: true, baixar_saida: true, incluir_eventos: true, modelo: 'todos', exibir_canceladas: false, obrigacoes: ['impt_nfs', 'apuracao'] }
-    : await q(sb.from('empresas').select('*').eq('id', id).single());
-  const escs = await q(sb.from('escritorios').select('id,nome').order('nome'));
+  const [empBanco, escs, rotinas] = await Promise.all([
+    nova ? null : q(sb.from('empresas').select('*').eq('id', id).single()),
+    q(sb.from('escritorios').select('id,nome').order('nome')),
+    q(sb.from('rotinas').select('escritorio_id,pasta_destino')),
+  ]);
+  const emp = empBanco || { escritorio_id: params.get('esc') || st.perfil.escritorio_id, uf: 'GO', baixar_entrada: true, baixar_saida: true, incluir_eventos: true, modelo: 'todos', exibir_canceladas: false, obrigacoes: ['impt_nfs', 'apuracao'] };
   const es = escs.find(e => e.id === emp.escritorio_id);
-  const rot = await q(sb.from('rotinas').select('pasta_destino').eq('escritorio_id', emp.escritorio_id).maybeSingle());
+  const rot = rotinas.find(r => r.escritorio_id === emp.escritorio_id);
   const sel = (v, a) => v === a ? 'selected' : '';
   await layout('escritorios', `
     <div class="top"><div><div class="sub"><a href="#/escritorio/${emp.escritorio_id}">${h(es?.nome || 'Escritório')}</a> / ${nova ? 'Nova empresa' : h(emp.razao_social)}</div><h1>${nova ? 'Cadastrar empresa' : 'Editar empresa'}</h1></div></div>
@@ -437,7 +490,7 @@ async function telaEmpresa(id, params) {
           <div class="g3">${OBRIG.map(([k, l]) => `<label class="chk"><input type="checkbox" name="ob_${k}" ${emp.obrigacoes.includes(k) ? 'checked' : ''}>${l}</label>`).join('')}</div>
         </section>
         <div style="display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap">
-          <div>${nova ? '' : '<button type="button" class="btn" id="desativar">Desativar empresa</button>'}</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">${nova ? '' : '<button type="button" class="btn" id="desativar">Desativar</button><button type="button" class="btn del-o" id="excluirEmp">Excluir empresa</button>'}</div>
           <div style="display:flex;gap:10px"><a class="btn" href="#/escritorio/${emp.escritorio_id}" style="display:inline-flex;align-items:center;text-decoration:none">Cancelar</a><button class="btn p" type="submit">Salvar empresa</button></div>
         </div>
       </form>
@@ -461,6 +514,12 @@ async function telaEmpresa(id, params) {
     };
     if (nova) await q(sb.from('empresas').insert(reg)); else await q(sb.from('empresas').update(reg).eq('id', id));
     toast('Empresa salva.'); go('#/escritorio/' + reg.escritorio_id);
+  };
+  if ($('#excluirEmp')) $('#excluirEmp').onclick = async () => {
+    const ok = await confirmarComSenha(`Excluir ${emp.razao_social}?`, 'Apaga a empresa, o histórico de downloads e as entregas dela. Não tem como desfazer. Se for só parar de baixar, use Desativar.');
+    if (!ok) return;
+    await q(sb.from('empresas').delete().eq('id', id));
+    toast('Empresa excluída.'); go('#/escritorio/' + emp.escritorio_id);
   };
   if ($('#desativar')) $('#desativar').onclick = async () => {
     if (!confirm('Desativar esta empresa? Ela some dos painéis e o robô para de baixar.')) return;
@@ -653,6 +712,8 @@ async function rota() {
     root.innerHTML = `<div class="login"><div class="card"><h1 style="font-size:20px">Aguardando liberação</h1><p class="sub">Seu login foi criado. O administrador precisa ligar você ao seu escritório.</p><button class="btn" id="sair">Sair</button></div></div>`;
     $('#sair').onclick = () => sb.auth.signOut(); return;
   }
+  carregarMenu();
+  mostrarCarregando();
   const [path, qs] = (location.hash.slice(1) || '/').split('?');
   const params = new URLSearchParams(qs || '');
   const p = path.split('/').filter(Boolean);
@@ -675,5 +736,6 @@ sb.auth.onAuthStateChange((evento, session) => {
   if (!session) st.perfil = null;
   if (evento === 'PASSWORD_RECOVERY') return setTimeout(telaNovaSenha, 0);
   // setTimeout: não chamar o Supabase de dentro do próprio callback (evita travar)
+  if (st.reautenticando && evento === 'SIGNED_IN') return; // conferência de senha na exclusão: não recarrega a tela
   if (['INITIAL_SESSION', 'SIGNED_IN', 'SIGNED_OUT'].includes(evento)) setTimeout(rota, 0);
 });
