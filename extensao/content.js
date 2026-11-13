@@ -283,13 +283,28 @@
 
   // Só age na tela da consulta (ou no meio de uma execução).
   setTimeout(async () => {
+  // Pedido do painel que veio no endereço da aba (#automacao=...)
+    try {
+      const mh = location.hash.match(/automacao=([^&]+)/);
+      if (mh) {
+        const p = JSON.parse(decodeURIComponent(mh[1]));
+        await chrome.storage.local.set({ pedido: { ...p, em: Date.now() }, login: {}, idas: {} });
+        history.replaceState(null, '', location.pathname + location.search);
+      }
+    } catch (_) {}
     const { pedido } = await chrome.storage.local.get('pedido');
     for (let i = 0; i < 20 && pedido && !$('#cmpNumIeDest'); i++) await dorme(1000);
     if (pedido && Date.now() - pedido.em < 60 * 60e3 && $('#cmpNumIeDest') && !(await ler())?.rodando) {
       await chrome.storage.local.set({ login: {}, idas: {} });
-      await chrome.storage.local.set({ pedido: null });   // pedido do botão "Baixar agora" do painel
+      await chrome.storage.local.set({ pedido: null });   // pedido do botão "Baixar" do painel
+      const { escritorio } = await chrome.storage.local.get('escritorio');
+      if (escritorio?.id !== pedido.escritorio_id) {
+        let esc = { id: pedido.escritorio_id, nome: 'Escritório' };
+        try { esc = (await bg({ tipo: 'api', caminho: `escritorios?select=id,nome&id=eq.${pedido.escritorio_id}` }))[0] || esc; } catch (_) {}
+        await chrome.storage.local.set({ escritorio: esc });
+      }
       montar(); $('#an-ie', caixa).value = pedido.ie || ''; return iniciar(pedido.execucao_id);
     }
     if ($('#cmpNumIeDest') || $('#btnHistoricoDownload') || (await ler())?.rodando) passo();
-  }, 1500);
+  }, 600);
 })();

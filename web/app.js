@@ -243,10 +243,14 @@ window.addEventListener('message', e => {
 });
 
 async function pedirExecucao(escritorioId, ie = null) {
+  const temExtensao = !!document.documentElement.dataset.automacaoNotas;
+  const aba = temExtensao ? window.open('about:blank', '_blank') : null;   // abre já no clique (o navegador não bloqueia)
   const exe = await q(sb.from('execucoes').insert({ escritorio_id: escritorioId, origem: 'manual', status: 'pendente' }).select('id').single());
-  if (document.documentElement.dataset.automacaoNotas) {
-    // Extensão do Chrome instalada: ela abre a Sefaz e baixa as notas desse escritório.
-    window.postMessage({ tipo: 'automacao-notas:executar', escritorio_id: escritorioId, execucao_id: exe.id, ie }, location.origin);
+  if (temExtensao) {
+    // Extensão do Chrome instalada: ela faz o login na Sefaz e baixa as notas.
+    const pedido = { escritorio_id: escritorioId, execucao_id: exe.id, ie };
+    window.postMessage({ tipo: 'automacao-notas:executar', ...pedido, abriu: !!aba }, location.origin);
+    if (aba) aba.location.href = 'https://nfeweb.sefaz.go.gov.br/nfeweb/sites/nfe/consulta-notas-recebidas#automacao=' + encodeURIComponent(JSON.stringify(pedido));
     toast('Abrindo a Sefaz numa aba nova. Se pedir login, entre e abra "Baixar XML NFE" — o download começa sozinho.');
   } else {
     toast('Pedido enviado. Instale a extensão "Automação de Notas" no Chrome (ou ligue o robô) para baixar.');

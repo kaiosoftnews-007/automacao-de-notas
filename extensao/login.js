@@ -28,7 +28,16 @@
     ['input', 'change', 'blur'].forEach(t => e.dispatchEvent(new Event(t, { bubbles: true })));
   };
 
-  await dorme(1500);
+  // Pedido do painel que veio no endereço da aba (#automacao=...)
+  try {
+    const mh = location.hash.match(/automacao=([^&]+)/);
+    if (mh) {
+      const p = JSON.parse(decodeURIComponent(mh[1]));
+      await chrome.storage.local.set({ pedido: { ...p, em: Date.now() }, login: {}, idas: {} });
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+  } catch (_) {}
+  await dorme(700);
   const esc = await ativo();
   if (!esc) return;
   if (/consulta-notas-recebidas/.test(location.href) && document.querySelector('#cmpNumIeDest')) return; // tela certa: o content.js cuida
