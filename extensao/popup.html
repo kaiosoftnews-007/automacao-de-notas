@@ -7,6 +7,11 @@ button{background:#1F3864;color:#fff;border:0;border-radius:6px;cursor:pointer}#
 <div id="dentro" hidden>
   <div>Conectado: <b id="quem"></b></div>
   <label>Escritório<select id="esc"></select></label>
+  <fieldset style="border:1px solid #DDE3EA;border-radius:6px;margin:8px 0;padding:6px 8px">
+    <legend style="font-size:12px;color:#5A6678">Login da Sefaz (fica só neste computador)</legend>
+    <input id="cpf" placeholder="CPF do contador"><input id="ssefaz" type="password" placeholder="Senha da Sefaz">
+    <button id="salvarSefaz">Salvar login da Sefaz</button>
+  </fieldset>
   <small>Agora abra a Sefaz GO → Acesso Restrito → Baixar XML NFE. O painel azul aparece na tela.</small>
   <button id="sair" style="background:#5A6678;margin-top:10px">Sair</button>
 </div>

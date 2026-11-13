@@ -284,7 +284,9 @@
   // Só age na tela da consulta (ou no meio de uma execução).
   setTimeout(async () => {
     const { pedido } = await chrome.storage.local.get('pedido');
+    for (let i = 0; i < 20 && pedido && !$('#cmpNumIeDest'); i++) await dorme(1000);
     if (pedido && Date.now() - pedido.em < 60 * 60e3 && $('#cmpNumIeDest') && !(await ler())?.rodando) {
+      await chrome.storage.local.set({ login: {}, idas: {} });
       await chrome.storage.local.set({ pedido: null });   // pedido do botão "Baixar agora" do painel
       montar(); $('#an-ie', caixa).value = pedido.ie || ''; return iniciar(pedido.execucao_id);
     }
