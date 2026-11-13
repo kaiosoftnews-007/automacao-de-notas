@@ -100,7 +100,7 @@
     if (typeof execucao_id !== 'string') execucao_id = null;
     try {
       const { sessao, escritorio } = await chrome.storage.local.get(['sessao', 'escritorio']);
-      if (!sessao || !escritorio) return dizer('Clique no ícone da extensão (canto do Chrome), entre com o login do painel e escolha o escritório.');
+      if (!sessao || !escritorio) return dizer('A extensão ainda não tem o login do painel: abra o painel (automacao-de-notas) neste Chrome, aperte F5 lá e depois clique em Iniciar aqui.');
       if (!$('#cmpNumIeDest')) return dizer('Abra a tela "Baixar XML NFE" (com os campos de período e inscrição) e clique em Iniciar de novo.');
       dizer('Buscando as empresas no painel...');
       const ie = so($('#an-ie', caixa).value);

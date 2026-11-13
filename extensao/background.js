@@ -17,7 +17,11 @@ async function auth(corpo, tipo) {
 async function token() {
   let { sessao } = await get('sessao');
   if (!sessao) throw new Error('Entre com o login do painel (ícone da extensão).');
-  if (Date.now() > sessao.expira) sessao = await auth({ refresh_token: sessao.refresh }, 'refresh_token');
+  if (Date.now() > sessao.expira) {
+    // O login que veio do painel não é renovado aqui (renovar derrubaria o login do próprio painel).
+    if (sessao.doPainel) throw new Error('o login do painel expirou: abra o painel neste Chrome e aperte F5.');
+    sessao = await auth({ refresh_token: sessao.refresh }, 'refresh_token');
+  }
   return sessao.access;
 }
 
@@ -34,6 +38,12 @@ async function api({ metodo = 'GET', caminho, corpo, prefer }) {
 chrome.runtime.onMessage.addListener((m, remetente, responder) => {
   (async () => {
     if (m.tipo === 'login') return auth({ email: m.email, password: m.senha }, 'password').then(s => ({ email: s.email }));
+    if (m.tipo === 'sessaoDoPainel') {
+      const { sessao } = await get('sessao');
+      if (!sessao || sessao.email !== m.email || sessao.expira < m.expira)
+        await set({ sessao: { access: m.access, refresh: m.refresh, expira: m.expira, email: m.email, doPainel: true } });
+      return true;
+    }
     if (m.tipo === 'sair') return set({ sessao: null });
     if (m.tipo === 'api') return api(m);
     if (m.tipo === 'nomeDownload') return set({ proximoNome: { nome: m.nome, ate: Date.now() + 120000 } });
