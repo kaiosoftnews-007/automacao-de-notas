@@ -43,9 +43,35 @@ function PastaDaEmpresa($g) {
   return (Join-Path $mae (Limpo $novo))
 }
 
+function GuiaDoNome($arquivo) {
+  # Nome: <ie>_<tipo>_<mmaaaa>__<destino em base64url>.zip
+  $i = $arquivo.IndexOf('__')   # o prefixo (ie_tipo_mês) não tem '__'; o base64 pode ter
+  if ($i -lt 0) { return $null }
+  $b = $arquivo.Substring($i + 2) -replace '\.zip$', '' -replace '\s*\(\d+\)$', ''
+  $b = $b.Replace('-', '+').Replace('_', '/')
+  while ($b.Length % 4) { $b += '=' }
+  $j = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b)) | ConvertFrom-Json
+  return @{ pasta = $j.p; mae = $j.m; codigo = [string]$j.c; nome = $j.n; arquivo = $j.a }
+}
+
 Anotar "iniciado (vigiando $base)"
 while ($true) {
   if (Test-Path -LiteralPath $base) {
+    # Formato novo: o destino vem no próprio nome do ZIP
+    foreach ($zip in Get-ChildItem -LiteralPath $base -Filter '*__*.zip' -File) {
+      if (Test-Path -LiteralPath "$($zip.FullName).crdownload") { continue }
+      try {
+        $g = GuiaDoNome $zip.Name
+        if (-not $g -or -not $g.arquivo) { continue }
+        $destino = Join-Path (PastaDaEmpresa $g) $g.arquivo
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destino) | Out-Null
+        Move-Item -LiteralPath $zip.FullName -Destination $destino -Force
+        Anotar "OK  $destino"
+      } catch {
+        Anotar "ERRO $($zip.Name) -> $($_.Exception.Message)"
+      }
+    }
+    # Formato antigo: guia em arquivo .destino.txt ao lado
     foreach ($guia in Get-ChildItem -LiteralPath $base -Filter '*.destino.txt' -File) {
       $zip = $guia.FullName -replace '\.destino\.txt$', ''
       if (-not (Test-Path -LiteralPath $zip) -or (Test-Path -LiteralPath "$zip.crdownload")) { continue }

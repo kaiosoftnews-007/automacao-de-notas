@@ -221,33 +221,40 @@
       await dorme(6000); return historico();
     }
     st.histAberto = false;
-    const usadas = new Set(), pend = () => st.fila.filter(i => i.etapa === 'pedido');
-    for (const item of pend()) {
-      let cand = linhas.filter(tr => !usadas.has(tr) && so(tr.innerText).includes(item.ie));
-      const doTipo = cand.filter(tr => (item.tipo === 'entrada' ? /entrada/i : /sa[ií]da/i).test(tr.innerText));
-      if (doTipo.length) cand = doTipo;
-      // O nome do ZIP não diz se é entrada ou saída: escolhe a linha com o horário mais perto do pedido.
-      const quando = tr => { const m = tr.innerText.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
-        return m ? new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5], +m[6]).getTime() : null; };
-      cand = cand.filter(tr => { const q = quando(tr); return q == null || !item.pedidoEm || q >= item.pedidoEm - 5 * 60e3; });
-      cand.sort((a, b) => Math.abs((quando(a) ?? 0) - (item.pedidoEm || 0)) - Math.abs((quando(b) ?? 0) - (item.pedidoEm || 0)));
-      const tr = cand[0]; if (!tr) continue;
+    const pend = () => st.fila.filter(i => i.etapa === 'pedido');
+    const quando = tr => { const m = tr.innerText.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
+      return m ? new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5], +m[6]).getTime() : null; };
+    const chave = tr => tr.innerText.replace(/\s+/g, ' ').trim().slice(0, 140);
+    st.histUsadas = st.histUsadas || [];
+    // Cada pedido gera uma linha no histórico, na ordem em que foi feito. O nome do ZIP não diz se é
+    // entrada ou saída, então casa os pedidos de cada IE com as linhas novas, em ordem de horário.
+    const pares = [], porIe = {};
+    for (const item of pend()) (porIe[item.ie] = porIe[item.ie] || []).push(item);
+    for (const [ie, itens] of Object.entries(porIe)) {
+      itens.sort((a, b) => (a.pedidoEm || 0) - (b.pedidoEm || 0));
+      const desde = Math.min(...itens.map(i => i.pedidoEm || Date.now())) - 2 * 60e3;
+      const linhasIe = linhas
+        .filter(tr => so(tr.innerText).includes(ie) && !st.histUsadas.includes(chave(tr)))
+        .filter(tr => { const q = quando(tr); return q == null || q >= desde; })
+        .sort((a, b) => (quando(a) ?? 0) - (quando(b) ?? 0));
+      itens.forEach((item, k) => { if (linhasIe[k]) pares.push([item, linhasIe[k]]); });
+    }
+    for (const [item, tr] of pares) {
       const link = $('a[href*="download" i],a[href],button:not([disabled])', tr);
       if (/processando|em process|aguard|fila|pendente/i.test(tr.innerText) || !link) continue;
-      usadas.add(tr);
+      st.histUsadas.push(chave(tr));
       if (/erro|falh|expirad/i.test(tr.innerText)) { item.etapa = 'erro'; item.msg = 'A Sefaz não gerou o arquivo: ' + tr.innerText.replace(/\s+/g, ' ').slice(0, 100); await banco(item, { status: 'erro', mensagem: item.msg }); continue; }
       const mmaaaa = st.comp.slice(5, 7) + st.comp.slice(0, 4);   // ex.: 102026
-      // O Chrome só salva em Downloads: o ZIP vai para Notas Sefaz\_organizar com um .destino.txt ao lado,
-      // e o organizador do Windows move para a pasta da empresa.
-      // Sem pasta no cadastro, o organizador procura dentro da pasta mãe uma pasta com o código ou o nome
-      // da empresa; se não achar, cria "código - nome".
-      const nomeArq = `${mmaaaa}\\${item.tipo === 'entrada' ? 'Entrada' : 'Saida'}_${mmaaaa}.zip`;
+      const tipoNome = item.tipo === 'entrada' ? 'Entrada' : 'Saida';
+      const nomeArq = `${mmaaaa}\\${tipoNome}_${mmaaaa}.zip`;
       const final = item.pastaEmpresa ? `${item.pastaEmpresa}\\${nomeArq}`
         : `${item.mae}\\${limpo(item.codigo ? `${item.codigo} - ${item.nome}` : item.nome)}\\${nomeArq}`;
-      const arq = `Notas Sefaz/_organizar/${item.ie}_${item.tipo}_${mmaaaa}.zip`;
-      const guia = [`pasta=${item.pastaEmpresa}`, `mae=${item.mae}`, `codigo=${item.codigo}`, `nome=${item.nome}`, `arquivo=${nomeArq}`].join('\r\n');
-      await bg({ tipo: 'gravarDestino', nome: arq + '.destino.txt', texto: guia });
-      await bg({ tipo: 'nomeDownload', nome: arq });
+      // O Chrome só salva em Downloads: o destino vai escrito no próprio nome do ZIP, e o organizador do
+      // Windows move para a pasta da empresa (sem pasta no cadastro, acha ou cria a pasta dentro da pasta mãe).
+      const guia = JSON.stringify(item.pastaEmpresa ? { p: item.pastaEmpresa, a: nomeArq }
+        : { m: item.mae, c: item.codigo, n: item.nome, a: nomeArq });
+      const b64 = btoa(unescape(encodeURIComponent(guia))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      await bg({ tipo: 'nomeDownload', nome: `Notas Sefaz/_organizar/${item.ie}_${item.tipo}_${mmaaaa}__${b64}.zip` });
       item.etapa = 'baixado'; await gravar(st);
       await banco(item, { status: 'concluido', qtd_notas: item.n, arquivo: final, mensagem: null });
       dizer(`Baixando ${item.nome} · ${item.tipo}...`);
