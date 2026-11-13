@@ -79,7 +79,22 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
     }
     if (m.tipo === 'clicar') {
       await chrome.scripting.executeScript({ target: { tabId: remetente.tab.id, frameIds: [remetente.frameId ?? 0] }, world: 'MAIN',
-        func: () => { const e = document.querySelector('[data-an-clicar]'); if (e) { e.removeAttribute('data-an-clicar'); e.click(); } } });
+        func: () => {
+          const e = document.querySelector('[data-an-clicar]');
+          if (!e) return;
+          e.removeAttribute('data-an-clicar');
+          // O que abriria em janela nova (bloqueada como pop-up) abre nesta mesma aba.
+          if (!window.__anAbrirAqui) {
+            window.__anAbrirAqui = true;
+            const original = window.open;
+            window.open = (url, alvo, ...resto) => {
+              if (url && url !== 'about:blank') { location.href = new URL(url, location.href).href; return window; }
+              return original.call(window, url, alvo, ...resto);
+            };
+          }
+          document.querySelectorAll('a[target], form[target]').forEach(x => { if (x.target !== '_self') x.target = '_self'; });
+          e.click();
+        } });
       return true;
     }
     if (m.tipo === 'avisar') return chrome.notifications.create({ type: 'basic', iconUrl: 'icone.png', title: 'Automação de Notas', message: m.texto });
