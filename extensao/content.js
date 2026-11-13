@@ -228,16 +228,17 @@
     st.histUsadas = st.histUsadas || [];
     // Cada pedido gera uma linha no histórico, na ordem em que foi feito. O nome do ZIP não diz se é
     // entrada ou saída, então casa os pedidos de cada IE com as linhas novas, em ordem de horário.
+    // Não depende do relógio do computador: para cada IE, as N linhas mais recentes do histórico são os
+    // N pedidos desta rodada (entrada e saída), na mesma ordem em que foram feitos.
     const pares = [], porIe = {};
-    for (const item of pend()) (porIe[item.ie] = porIe[item.ie] || []).push(item);
+    for (const item of st.fila.filter(i => i.pedidoEm && ['pedido', 'baixado'].includes(i.etapa) || i.etapa === 'pedido'))
+      (porIe[item.ie] = porIe[item.ie] || []).push(item);
     for (const [ie, itens] of Object.entries(porIe)) {
       itens.sort((a, b) => (a.pedidoEm || 0) - (b.pedidoEm || 0));
-      const desde = Math.min(...itens.map(i => i.pedidoEm || Date.now())) - 2 * 60e3;
-      const linhasIe = linhas
-        .filter(tr => so(tr.innerText).includes(ie) && !st.histUsadas.includes(chave(tr)))
-        .filter(tr => { const q = quando(tr); return q == null || q >= desde; })
-        .sort((a, b) => (quando(a) ?? 0) - (quando(b) ?? 0));
-      itens.forEach((item, k) => { if (linhasIe[k]) pares.push([item, linhasIe[k]]); });
+      const recentes = linhas.filter(tr => so(tr.innerText).includes(ie))
+        .sort((a, b) => (quando(b) ?? 0) - (quando(a) ?? 0)).slice(0, itens.length).reverse();
+      if (recentes.length < itens.length) continue;            // algum pedido ainda não apareceu no histórico
+      itens.forEach((item, k) => { if (item.etapa === 'pedido' && !st.histUsadas.includes(chave(recentes[k]))) pares.push([item, recentes[k]]); });
     }
     for (const [item, tr] of pares) {
       const link = $('a[href*="download" i],a[href],button:not([disabled])', tr);
