@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Automação de Notas — Sefaz GO",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "description": "Baixa os XMLs (entrada e saída) no portal da Sefaz GO, empresa por empresa, e registra no painel. A verificação 'Confirme que é humano' nunca é clicada pela extensão.",
   "permissions": [
     "storage",
     "downloads",
-    "notifications"
+    "notifications",
+    "scripting"
   ],
   "host_permissions": [
     "https://ankmyrxwxaevxmorfedd.supabase.co/*",

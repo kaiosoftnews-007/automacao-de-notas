@@ -103,9 +103,12 @@
       const cpf = campos.find(e => /cpf/i.test(e.placeholder + e.name + e.id)) || campos[0];
       const sen = [...document.querySelectorAll('input[type=password]')].find(visivel);
       if (!sen) return;                                          // saiu da tela de login: deu certo
-      if (cpf && !cpf.readOnly && !cpf.disabled) await digitar(cpf, c.cpf);
-      await digitar(sen, c.senha);
-      await dorme(500);
+      const ok = (await msg({ tipo: 'preencherLogin', cpf: c.cpf, senha: c.senha }))?.ok;
+      if (!ok?.cpfOk || !ok?.senhaOk) {                          // reserva: digita tecla por tecla
+        if (cpf && !cpf.readOnly && !cpf.disabled) await digitar(cpf, c.cpf);
+        await digitar(sen, c.senha);
+      }
+      await dorme(600);
       const botao = [...document.querySelectorAll('button,input[type=submit],input[type=button],a')]
         .find(b => visivel(b) && /autenticar|entrar/i.test(b.innerText || b.value || ''));
       if (botao) botao.click(); else sen.form?.requestSubmit?.() || sen.form?.submit();

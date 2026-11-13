@@ -50,6 +50,29 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
       const r = await api({ metodo: 'POST', caminho: 'rpc/extensao_obter_credencial', corpo: { p_escritorio: m.escritorio_id } });
       return r?.[0] ? { cpf: String(r[0].cpf).replace(/\D/g, ''), senha: r[0].senha } : null;
     }
+    if (m.tipo === 'preencherLogin') {
+      const [r] = await chrome.scripting.executeScript({
+        target: { tabId: remetente.tab.id, frameIds: [remetente.frameId ?? 0] }, world: 'MAIN', args: [m.cpf, m.senha],
+        func: (cpf, senha) => {
+          const vis = e => !!(e && (e.offsetParent || e.getClientRects().length));
+          const ev = e => ['input', 'change', 'keyup', 'blur'].forEach(t => e.dispatchEvent(new Event(t, { bubbles: true })));
+          const textos = [...document.querySelectorAll('input:not([type=hidden]):not([type=password]):not([type=checkbox]):not([type=radio])')].filter(vis);
+          const u = document.querySelector('#username') || textos.find(e => /cpf|user/i.test(e.placeholder + e.name + e.id)) || textos[0];
+          const p = document.querySelector('#password') || [...document.querySelectorAll('input[type=password]')].find(vis);
+          if (u && !u.readOnly && !u.disabled) {
+            u.focus();
+            if (u.inputmask) u.inputmask.setValue(cpf);
+            else if (window.jQuery?.fn?.inputmask) window.jQuery(u).inputmask('setvalue', cpf);
+            else u.value = cpf;
+            ev(u);
+          }
+          if (p) { p.focus(); p.value = senha; ev(p); }
+          const lido = u ? (u.inputmask?.unmaskedvalue?.() ?? u.value).replace(/\D/g, '') : cpf;
+          return { cpfOk: !u || u.readOnly || lido === cpf, senhaOk: !!p && p.value === senha };
+        },
+      });
+      return r?.result;
+    }
     if (m.tipo === 'avisar') return chrome.notifications.create({ type: 'basic', iconUrl: 'icone.png', title: 'Automação de Notas', message: m.texto });
   })().then(ok => responder({ ok }), e => responder({ erro: e.message }));
   return true;
