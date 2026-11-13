@@ -8,7 +8,7 @@
   window.__automacaoNotas = true;
 
   const CONSULTA = 'https://nfeweb.sefaz.go.gov.br/nfeweb/sites/nfe/consulta-notas-recebidas';
-  const ESPERA_VERIFICACAO = 10 * 60e3, ESPERA_RESULTADO = 40e3, PAUSA = 3000, MAX_HIST = 30;
+  const ESPERA_VERIFICACAO = 10 * 60e3, ESPERA_RESULTADO = 40e3, PAUSA = 1500, MAX_HIST = 30;
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const dorme = ms => new Promise(r => setTimeout(r, ms));
@@ -183,7 +183,7 @@
     while (Date.now() - t0 < ESPERA_RESULTADO) {
       const t = texto(), m = t.match(/Total de notas:\s*(\d+)/i);
       if (m && +m[1] > 0) { item.n = +m[1]; return pedirDownload(item); }
-      if (m || /nenhum[a]? (nota|registro|resultado)|n[ãa]o (foram )?encontrad/i.test(t)) {
+      if (m || /sem resultado|nenhum[a]? (nota|registro|resultado)|n[ãa]o (foram )?encontrad/i.test(t)) {
         item.etapa = 'sem_notas'; item.n = 0; await banco(item, { status: 'sem_notas', qtd_notas: 0, mensagem: null }); return irForm();
       }
       await dorme(1500);
