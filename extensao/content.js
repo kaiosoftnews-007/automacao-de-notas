@@ -16,7 +16,7 @@
   const texto = () => document.body?.innerText || '';
   const bg = m => new Promise((ok, err) => chrome.runtime.sendMessage(m, r => r?.erro ? err(new Error(r.erro)) : ok(r?.ok)));
   const ler = async () => (await chrome.storage.local.get('exec')).exec || null;
-  const gravar = exec => chrome.storage.local.set({ exec });
+  const gravar = exec => chrome.storage.local.set({ exec: exec && { ...exec, atualizado: Date.now() } });
   const limpo = t => String(t).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
   const so = t => String(t || '').replace(/\D/g, '');
   let st = null, ocupado = false;

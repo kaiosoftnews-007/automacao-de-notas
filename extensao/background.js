@@ -14,13 +14,24 @@ async function auth(corpo, tipo) {
   return sessao;
 }
 
+// Login fixo opcional: arquivo credenciais.json (fica só no seu computador, nunca vai para o GitHub).
+let LOGIN_FIXO = null;
+const fixoPronto = fetch(chrome.runtime.getURL('credenciais.json')).then(r => r.ok ? r.json() : null)
+  .then(c => { if (c?.email && c?.senha) LOGIN_FIXO = c; }).catch(() => {});
+const entrarFixo = () => auth({ email: LOGIN_FIXO.email, password: LOGIN_FIXO.senha }, 'password');
+
 async function token() {
+  await fixoPronto;
   let { sessao } = await get('sessao');
-  if (!sessao) throw new Error('Entre com o login do painel (ícone da extensão).');
+  if (!sessao) {
+    if (!LOGIN_FIXO) throw new Error('Entre com o login do painel (ícone da extensão).');
+    sessao = await entrarFixo();
+  }
   if (Date.now() > sessao.expira) {
     // O login que veio do painel não é renovado aqui (renovar derrubaria o login do próprio painel).
-    if (sessao.doPainel) throw new Error('o login do painel expirou: abra o painel neste Chrome e aperte F5.');
-    sessao = await auth({ refresh_token: sessao.refresh }, 'refresh_token');
+    if (sessao.doPainel && !LOGIN_FIXO) throw new Error('o login do painel expirou: abra o painel neste Chrome e aperte F5.');
+    if (sessao.doPainel) sessao = await entrarFixo();
+    else sessao = await auth({ refresh_token: sessao.refresh }, 'refresh_token').catch(e => { if (LOGIN_FIXO) return entrarFixo(); throw e; });
   }
   return sessao.access;
 }
@@ -37,23 +48,25 @@ async function api({ metodo = 'GET', caminho, corpo, prefer }) {
 
 chrome.runtime.onMessage.addListener((m, remetente, responder) => {
   (async () => {
+    await fixoPronto;
     if (m.tipo === 'login') return auth({ email: m.email, password: m.senha }, 'password').then(s => ({ email: s.email }));
     if (m.tipo === 'sessaoDoPainel') {
       const { sessao } = await get('sessao');
+      if (LOGIN_FIXO && sessao && !sessao.doPainel) return true;   // já tem login próprio, que se renova sozinho
       if (!sessao || sessao.email !== m.email || sessao.expira < m.expira)
         await set({ sessao: { access: m.access, refresh: m.refresh, expira: m.expira, email: m.email, doPainel: true } });
       return true;
     }
+    if (m.tipo === 'garantirSessao') { const { sessao } = await get('sessao'); if (!sessao && LOGIN_FIXO) await entrarFixo(); return true; }
     if (m.tipo === 'sair') return set({ sessao: null });
-    if (m.tipo === 'api') return api(m);
+    if (m.tipo === 'api') { if (/^downloads/.test(m.caminho || '') && m.metodo && m.metodo !== 'GET') marcarVerificacao(false); return api(m); }
     if (m.tipo === 'nomeDownload') return set({ proximoNome: { nome: m.nome, ate: Date.now() + 120000 } });
-    if (m.tipo === 'executar') {
-      await set({ pedido: { escritorio_id: m.escritorio_id, execucao_id: m.execucao_id, ie: m.ie || null, comp: m.comp || null, em: Date.now() } });
-      // Abre a Sefaz numa aba em segundo plano: você continua na página em que está.
-      if (!m.abriu) await chrome.tabs.create({ url: 'https://portal.sefaz.go.gov.br/portalsefaz-apps/', active: false, index: 999 });
-      const [esc] = await api({ caminho: `escritorios?select=id,nome&id=eq.${m.escritorio_id}` });
-      if (!esc) throw new Error('este login da extensão não enxerga o escritório. Entre na extensão com o mesmo login do painel.');
-      await set({ escritorio: esc });
+    if (m.tipo === 'executar') return executar(m);
+    if (m.tipo === 'salvarPc') return salvarPc(m.nome);
+    if (m.tipo === 'lerPc') return (await get('pc')).pc || null;
+    if (m.tipo === 'focar') {   // login da Sefaz pediu verificação: avisa sem tirar você da aba em que está
+      marcarVerificacao(true);
+      await alertar(remetente.tab, 'Sefaz: falta a verificação no login', 'CPF e senha já estão preenchidos. Faça a verificação e clique em Autenticar.');
       return true;
     }
     if (m.tipo === 'irPara') { if (remetente.tab?.id) await chrome.tabs.update(remetente.tab.id, { url: m.url }); return true; }
@@ -74,10 +87,13 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
             u.focus();
             if (u.inputmask) u.inputmask.setValue(cpf);
             else if (window.jQuery?.fn?.inputmask) window.jQuery(u).inputmask('setvalue', cpf);
-            else u.value = cpf;
+            else { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(u, cpf); u.dispatchEvent(new InputEvent('input', { bubbles: true, data: cpf, inputType: 'insertText' })); }
             ev(u);
           }
-          if (p) { p.focus(); p.value = senha; ev(p); }
+          // Setter nativo: a tela de login é feita em framework (React/Angular) e "p.value = x" não chega ao
+          // estado da página — ela enviava a senha vazia e a Sefaz respondia "Usuário ou Senha inválidos".
+          const nativo = (e, v) => Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, v);
+          if (p) { p.focus(); nativo(p, ''); ev(p); nativo(p, senha); p.dispatchEvent(new InputEvent('input', { bubbles: true, data: senha, inputType: 'insertText' })); ev(p); }
           const lido = u ? (u.inputmask?.unmaskedvalue?.() ?? u.value).replace(/\D/g, '') : cpf;
           return { cpfOk: !u || u.readOnly || lido === cpf, senhaOk: !!p && p.value === senha };
         },
@@ -127,16 +143,12 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
       return true;
     }
     if (m.tipo === 'verificacao') {
-      await set({ abaVerificacao: { tab: remetente.tab.id, janela: remetente.tab.windowId } });
-      chrome.action.setBadgeText({ text: '!' }); chrome.action.setBadgeBackgroundColor({ color: '#B3261E' });
-      chrome.notifications.create('verificacao', { type: 'basic', iconUrl: 'icone.png', requireInteraction: true, priority: 2,
-        title: 'Sefaz: confirme que é humano', message: 'Clique aqui para abrir a aba da Sefaz e marcar a caixinha. Depois eu continuo sozinho.' });
+      marcarVerificacao(true);
+      await alertar(remetente.tab, 'Sefaz: confirme que é humano', 'Marque a caixinha "Confirme que é humano" na aba da Sefaz. Depois eu continuo sozinho.');
       return true;
     }
-    if (m.tipo === 'verificacaoOk') {
-      chrome.action.setBadgeText({ text: '' }); chrome.notifications.clear('verificacao');
-      return true;
-    }
+    if (m.tipo === 'verificacaoOk') { marcarVerificacao(false); await limparAlerta(); return true; }
+    if (m.tipo === 'irVerificacao') { await irParaSefaz(); return true; }
     if (m.tipo === 'avisar') return chrome.notifications.create({ type: 'basic', iconUrl: 'icone.png', title: 'Automação de Notas', message: m.texto });
   })().then(ok => responder({ ok }), e => responder({ erro: e.message }));
   return true;
@@ -152,10 +164,118 @@ chrome.downloads.onDeterminingFilename.addListener((item, sugerir) => {
   return true;
 });
 
-// Clicar no aviso da verificação leva direto para a aba da Sefaz.
-chrome.notifications.onClicked.addListener(async id => {
-  if (id !== 'verificacao') return;
+// ---- Aviso de verificação: notificação do Windows + "!" vermelho no ícone + faixa vermelha nas abas do painel.
+// Nada disso muda a aba em que você está; só leva para a Sefaz se você clicar.
+const PAINEL = 'https://automacao-de-notas.denise-vaz1541.workers.dev/*';
+async function alertar(aba, titulo, texto) {
+  if (aba) await set({ abaVerificacao: { tab: aba.id, janela: aba.windowId } });
+  chrome.action.setBadgeText({ text: '!' }); chrome.action.setBadgeBackgroundColor({ color: '#B3261E' });
+  chrome.notifications.create('verificacao', { type: 'basic', iconUrl: 'icone.png', requireInteraction: true, priority: 2,
+    title: titulo, message: texto + ' (clique aqui para ir até a aba)' });
+  for (const t of await chrome.tabs.query({ url: PAINEL }))
+    chrome.scripting.executeScript({ target: { tabId: t.id }, args: [titulo, texto], func: (titulo, texto) => {
+      let f = document.getElementById('an-alerta');
+      if (!f) { f = document.createElement('div'); f.id = 'an-alerta'; document.body.appendChild(f); }
+      f.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#B3261E;color:#fff;font:15px Arial;padding:12px 16px;display:flex;gap:14px;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+      f.innerHTML = '';
+      const t = document.createElement('span'); t.innerHTML = '<b></b> — '; t.querySelector('b').textContent = titulo; t.append(texto);
+      const b = document.createElement('button'); b.textContent = 'Ir para a aba da Sefaz';
+      b.style.cssText = 'background:#fff;color:#B3261E;border:0;border-radius:6px;padding:7px 12px;font:bold 14px Arial;cursor:pointer';
+      b.onclick = () => chrome.runtime.sendMessage({ tipo: 'irVerificacao' });
+      f.append(t, b);
+    } }).catch(() => {});
+}
+async function limparAlerta() {
+  chrome.action.setBadgeText({ text: '' }); chrome.notifications.clear('verificacao');
+  for (const t of await chrome.tabs.query({ url: PAINEL }))
+    chrome.scripting.executeScript({ target: { tabId: t.id }, func: () => document.getElementById('an-alerta')?.remove() }).catch(() => {});
+}
+async function irParaSefaz() {
   const { abaVerificacao: a } = await get('abaVerificacao');
-  if (a) { chrome.windows.update(a.janela, { focused: true }); chrome.tabs.update(a.tab, { active: true }); }
-  chrome.notifications.clear(id);
+  if (a) { await chrome.windows.update(a.janela, { focused: true }); await chrome.tabs.update(a.tab, { active: true }); }
+}
+chrome.notifications.onClicked.addListener(async id => { if (id === 'verificacao') { await irParaSefaz(); chrome.notifications.clear(id); } });
+
+// Quando a extensão é instalada ou atualizada, o Chrome não liga ela nas abas do painel que já estavam abertas
+// (o clique em Baixar dizia "Instale a extensão"). Aqui ela se liga nessas abas sozinha.
+chrome.runtime.onInstalled.addListener(async () => {
+  const abas = await chrome.tabs.query({ url: 'https://automacao-de-notas.denise-vaz1541.workers.dev/*' });
+  for (const aba of abas) chrome.scripting.executeScript({ target: { tabId: aba.id }, files: ['painel.js'] }).catch(() => {});
 });
+
+
+// ================= 3.8.0: baixar em outro computador =================
+// Este computador se cadastra no painel (com o nome dado no ícone da extensão), dá sinal a cada minuto
+// e pega sozinho os pedidos que alguém fez para ele no painel, de qualquer máquina.
+// O download em si é o mesmo do clique em "Baixar" (função executar).
+const SEFAZ_INICIO = 'https://portal.sefaz.go.gov.br/portalsefaz-apps/';
+
+async function executar(m) {
+  await set({ pedido: { escritorio_id: m.escritorio_id, execucao_id: m.execucao_id, ie: m.ie || null, comp: m.comp || null, em: Date.now() } });
+  // Abre a Sefaz numa aba em segundo plano: você continua na página em que está.
+  if (!m.abriu) {
+    try { await chrome.tabs.create({ url: SEFAZ_INICIO, active: false }); }   // abre ao lado, sem tirar você da aba
+    catch (_) { await chrome.windows.create({ url: SEFAZ_INICIO, focused: false }); }   // Chrome aberto sem nenhuma janela
+  }
+  const [esc] = await api({ caminho: `escritorios?select=id,nome&id=eq.${m.escritorio_id}` });
+  if (!esc) throw new Error('este login da extensão não enxerga o escritório. Entre na extensão com o mesmo login do painel.');
+  await set({ escritorio: esc });
+  return true;
+}
+
+async function cadastrarPc(nome) {
+  const [pc] = await api({ metodo: 'POST', caminho: 'computadores?select=id,nome', prefer: 'return=representation',
+    corpo: { nome, versao: chrome.runtime.getManifest().version, ultimo_sinal: new Date().toISOString() } });
+  await set({ pc: { id: pc.id, nome: pc.nome } });
+  return pc;
+}
+async function salvarPc(nome) {
+  nome = String(nome || '').trim().toUpperCase().slice(0, 40);
+  if (!nome) throw new Error('Digite um nome para este computador (ex.: PC-ESCRITORIO).');
+  await fixoPronto;
+  const { pc } = await get('pc');
+  if (pc?.id) {
+    const r = await api({ metodo: 'PATCH', caminho: `computadores?id=eq.${pc.id}&select=id`, prefer: 'return=representation', corpo: { nome } });
+    if (r?.length) { await set({ pc: { id: pc.id, nome } }); sinal(); return { id: pc.id, nome }; }
+  }
+  const novo = await cadastrarPc(nome); sinal(); return novo;
+}
+
+let verifLigada = null;
+async function marcarVerificacao(parado) {
+  if (verifLigada === parado) return;
+  const { pc } = await get('pc'); if (!pc?.id) return;
+  verifLigada = parado;
+  api({ metodo: 'PATCH', caminho: `computadores?id=eq.${pc.id}`, corpo: { verificacao_desde: parado ? new Date().toISOString() : null } }).catch(() => { verifLigada = null; });
+}
+
+async function ocupado() {
+  const { pedido, exec } = await get(['pedido', 'exec']);
+  if (pedido && Date.now() - (pedido.em || 0) < 60 * 60e3) return true;                 // pedido abrindo a Sefaz
+  if (exec?.rodando && Date.now() - (exec.atualizado || 0) < 2 * 3600e3) return true;   // download em andamento
+  return false;
+}
+
+let sinalRodando = false;
+async function sinal() {
+  if (sinalRodando) return; sinalRodando = true;
+  try {
+    await fixoPronto;
+    const { pc } = await get('pc'); if (!pc?.id) return;   // sem nome: este computador não entra na lista
+    const r = await api({ metodo: 'PATCH', caminho: `computadores?id=eq.${pc.id}&select=id`, prefer: 'return=representation',
+      corpo: { ultimo_sinal: new Date().toISOString(), versao: chrome.runtime.getManifest().version } });
+    if (!r?.length) { await cadastrarPc(pc.nome); return; }   // foi removido no painel: volta para a lista
+    if (await ocupado()) return;
+    const [p] = await api({ metodo: 'POST', caminho: 'rpc/extensao_pegar_pedido', corpo: { p_pc: pc.id } }) || [];
+    if (!p) return;
+    await executar({ escritorio_id: p.escritorio_id, execucao_id: p.id, ie: p.ie, comp: p.competencia });
+    chrome.notifications.create({ type: 'basic', iconUrl: 'icone.png', title: 'Automação de Notas',
+      message: 'Download pedido pelo painel começou neste computador (aba da Sefaz em segundo plano).' });
+  } catch (e) { console.warn('sinal:', e.message); }
+  finally { sinalRodando = false; }
+}
+
+chrome.alarms.create('sinal', { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener(a => { if (a.name === 'sinal') sinal(); });
+chrome.runtime.onStartup.addListener(() => sinal());
+sinal();

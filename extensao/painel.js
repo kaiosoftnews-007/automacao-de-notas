@@ -1,6 +1,9 @@
 // Roda no site do painel: avisa que a extensão está instalada, passa o login do painel para a
 // extensão (assim ninguém precisa entrar de novo nela) e repassa o botão "Baixar".
-document.documentElement.dataset.automacaoNotas = chrome.runtime.getManifest().version;   // versão, para diagnóstico
+(() => {
+const versaoDesta = chrome.runtime.getManifest().version;
+document.documentElement.dataset.automacaoNotas = versaoDesta;   // versão, para diagnóstico
+chrome.storage.local.get('pc', ({ pc }) => { if (pc?.id) document.documentElement.dataset.automacaoPc = pc.id; });   // qual computador é este
 
 function enviarSessao() {
   try {
@@ -27,6 +30,9 @@ window.addEventListener('message', e => {
       if (m) erro(m);
     });
   } catch (_) {
-    erro('a extensão foi atualizada. Aperte Ctrl+F5 nesta página e clique de novo.');
+    // Cópia antiga desta rotina (de antes de atualizar a extensão): a nova já cuida do clique.
+    if (!document.documentElement.dataset.automacaoNotas || document.documentElement.dataset.automacaoNotas === versaoDesta)
+      erro('a extensão foi atualizada. Aperte Ctrl+F5 nesta página e clique de novo.');
   }
 });
+})();

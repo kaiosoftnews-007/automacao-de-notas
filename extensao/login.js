@@ -71,6 +71,7 @@
 
   // 1) Tela pedindo senha (login do portal ou "requer nova autenticação")
   const senha = [...document.querySelectorAll('input[type=password]')].find(visivel);
+  if (!senha && topo) msg({ tipo: 'verificacaoOk' });           // passou do login: tira o aviso vermelho
   if (senha) {
     const r = await msg({ tipo: 'credSefaz', escritorio_id: esc });
     let c = r?.ok;
@@ -79,7 +80,7 @@
       faixa('não achei o login da Sefaz deste escritório. Cadastre em "Acesso à Sefaz" no painel.');
       return avisar('Login da Sefaz não encontrado: cadastre em Acesso à Sefaz no painel.' + (r?.erro ? ' (' + r.erro + ')' : ''));
     }
-    if (!(await conta('login', 5))) {
+    if (!(await conta('login', 6))) {
       faixa('a Sefaz não aceitou o CPF e a senha. Confira em "Acesso à Sefaz" no painel.');
       await set({ pedido: null });
       return avisar('A Sefaz recusou o login cadastrado no painel (Acesso à Sefaz).');
@@ -100,33 +101,64 @@
       }
       el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('blur', { bubbles: true }));
     };
-    const recusou = () => /(senha|credenciais?)[^.\n]{0,40}(inv[aá]lid|incorret|n[aã]o confere)|bloquead/i.test(texto());
-    for (let tentativa = 1; tentativa <= 4; tentativa++) {
-      faixa(tentativa === 1 ? 'entrando na Sefaz...' : `entrando na Sefaz (tentativa ${tentativa})...`);
-      const campos = [...document.querySelectorAll('input:not([type=hidden]):not([type=password]):not([type=checkbox]):not([type=radio])')].filter(visivel);
-      const cpf = campos.find(e => /cpf/i.test(e.placeholder + e.name + e.id)) || campos[0];
-      const sen = [...document.querySelectorAll('input[type=password]')].find(visivel);
-      if (!sen) return;                                          // saiu da tela de login: deu certo
-      const ok = (await msg({ tipo: 'preencherLogin', cpf: c.cpf, senha: c.senha }))?.ok;
-      if (!ok?.cpfOk || !ok?.senhaOk) {                          // reserva: digita tecla por tecla
-        if (cpf && !cpf.readOnly && !cpf.disabled) await digitar(cpf, c.cpf);
-        await digitar(sen, c.senha);
+    // Os campos são procurados de novo a cada vez: a tela da Sefaz às vezes recria o campo de CPF (e ele "some").
+    const campoCpf = () => { const cs = [...document.querySelectorAll('input:not([type=hidden]):not([type=password]):not([type=checkbox]):not([type=radio])')].filter(visivel);
+      return cs.find(e => /cpf|user/i.test(e.placeholder + e.name + e.id)) || cs[0]; };
+    const campoSenha = () => [...document.querySelectorAll('input[type=password]')].find(visivel);
+    const cpfLido = () => { const e = campoCpf(); return e ? String(e.inputmask?.unmaskedvalue?.() ?? e.value).replace(/\D/g, '') : ''; };
+    const camposOk = () => cpfLido() === c.cpf && campoSenha()?.value === c.senha;
+    // Preenche CPF e senha e confere os dois antes de seguir (até 4 vezes).
+    const preencher = async () => {
+      for (let k = 0; k < 4; k++) {
+        if (k === 0) {
+          await msg({ tipo: 'preencherLogin', cpf: c.cpf, senha: c.senha });
+          const s0 = campoSenha(); if (s0) await digitar(s0, c.senha);   // senha sempre digitada tecla a tecla
+        }
+        else {
+          const e = campoCpf(); if (e && !e.readOnly && !e.disabled && cpfLido() !== c.cpf) await digitar(e, c.cpf);
+          const s = campoSenha(); if (s && s.value !== c.senha) await digitar(s, c.senha);
+        }
+        await dorme(800);                                         // espera a tela "assentar": é aí que o CPF costuma sumir
+        if (camposOk()) return true;
       }
-      await dorme(600);
+      return camposOk();
+    };
+    const captcha = () => /captcha|confirme que (é|e) humano/i.test(texto());
+    const chamarVoce = async () => {
+      await preencher();
+      faixa('a Sefaz pediu a verificação. CPF e senha já estão preenchidos: faça a verificação e clique em Autenticar — eu continuo depois.');
+      await msg({ tipo: 'focar' });
+      return avisar('A Sefaz pediu a verificação humana. Abri a aba: faça a verificação e clique em Autenticar.');
+    };
+    const recusou = () => /(senha|credenciais?)[^.\n]{0,40}(inv[aá]lid|incorret|n[aã]o confere)|bloquead/i.test(texto());
+
+    // Voltou da tentativa anterior com "erro na validação do Captcha" (quase sempre porque o CPF tinha sumido):
+    // espera o bloqueio de alguns segundos e tenta de novo; na 3ª vez, chama você.
+    if (captcha()) {
+      if (!(await conta('captcha', 2))) return chamarVoce();
+      const seg = +(texto().match(/aguarde\s+(\d+)\s+segundo/i)?.[1] || 6);
+      for (let s = seg + 1; s > 0; s--) { faixa(`a Sefaz pediu para esperar ${s} s; já tento de novo...`); await dorme(1000); }
+    }
+    await dorme(1200);                                            // primeiro acesso: a tela ainda está montando os campos
+    for (let tentativa = 1; tentativa <= 3; tentativa++) {
+      faixa(tentativa === 1 ? 'entrando na Sefaz...' : `entrando na Sefaz (tentativa ${tentativa})...`);
+      if (!campoSenha()) return;                                  // saiu da tela de login: deu certo
+      if (!(await preencher())) { faixa('o CPF não fica no campo; tentando de novo...'); continue; }
       const botao = [...document.querySelectorAll('button,input[type=submit],input[type=button],a')]
         .find(b => visivel(b) && /autenticar|entrar/i.test(b.innerText || b.value || ''));
-      if (botao) await clicar(botao); else sen.form?.requestSubmit?.() || sen.form?.submit();
+      if (!camposOk()) continue;                                  // conferência final, logo antes do clique
+      if (botao) await clicar(botao); else campoSenha()?.form?.requestSubmit?.();
       await dorme(5000);
-      if (![...document.querySelectorAll('input[type=password]')].some(visivel)) return;   // entrou
-      if (recusou()) break;                                      // senha errada de verdade: não insiste
+      if (!campoSenha()) return;                                  // entrou
+      if (captcha()) return;                                      // a página recarrega e esta rotina recomeça lá em cima
+      if (recusou()) break;                                       // senha errada de verdade: não insiste
     }
     if (recusou()) {
       faixa('a Sefaz não aceitou o CPF e a senha. Confira em "Acesso à Sefaz" no painel.');
       await set({ pedido: null });
       return avisar('A Sefaz recusou o login cadastrado no painel (Acesso à Sefaz).');
     }
-    faixa('não consegui entrar depois de 4 tentativas. Recarregue a página (F5) que eu tento de novo.');
-    return;
+    return chamarVoce();
   }
 
   // 2) "Você não tem permissão" (link direto da consulta) → recomeça pelo Acesso Restrito

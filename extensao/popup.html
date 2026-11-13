@@ -7,8 +7,15 @@ button{background:#1F3864;color:#fff;border:0;border-radius:6px;cursor:pointer}#
 <div id="dentro" hidden>
   <div>Conectado: <b id="quem"></b></div>
   <label>Escritório<select id="esc"></select></label>
+  <div id="agora" style="font-size:12px;color:#17804A" hidden>Baixando agora para este escritório (escolhido no painel).</div>
   <div id="sefaz" style="margin:8px 0;font-size:12px;color:#5A6678"></div>
-  <small>Agora abra a Sefaz GO → Acesso Restrito → Baixar XML NFE. O painel azul aparece na tela.</small>
+  <small>É só clicar em Baixar no painel: a extensão abre a Sefaz, entra e baixa sozinha. Se a Sefaz pedir a verificação humana, ela te chama.</small>
+  <div style="border-top:1px solid #DDE3EA;margin-top:10px;padding-top:8px">
+    <b>Este computador</b>
+    <input id="pcnome" placeholder="Nome (ex.: PC-ESCRITORIO)">
+    <button id="pcsalvar">Salvar nome</button>
+    <small id="pcinfo">Com nome, ele aparece em "Baixar em" no painel e baixa os pedidos feitos de qualquer computador.</small>
+  </div>
   <button id="sair" style="background:#5A6678;margin-top:10px">Sair</button>
 </div>
 <div id="msg"></div>
