@@ -156,6 +156,7 @@
   async function falhar(item, msg) { item.etapa = 'erro'; item.msg = msg; await banco(item, { status: 'erro', mensagem: msg.slice(0, 400) }); return irForm(); }
 
   async function preencherEPesquisar(item) {
+    if (!/^\d{9}$/.test(item.ie)) return falhar(item, `Inscrição estadual ${item.ie} inválida: em Goiás ela tem 9 números. Corrija no cadastro da empresa.`);
     setar('#cmpDataInicial', st.ini); setar('#cmpDataFinal', st.fim); setar('#cmpNumIeDest', item.ie);
     const radio = $(`input[name=cmpTipoNota][value="${item.tipo === 'entrada' ? 0 : 1}"]`);
     if (!radio) throw new Error('opção Entrada/Saída não encontrada na tela');
@@ -182,7 +183,10 @@
       }
       await dorme(1500);
     }
-    return falhar(item, 'Resposta inesperada da Sefaz na consulta: ' + texto().replace(/\s+/g, ' ').slice(0, 120));
+    const aviso = $$('.alert,.erro,.error,.msg,.mensagem,.text-danger,.invalid-feedback,[role=alert]')
+      .filter(e => visivel(e) && !caixa.contains(e)).map(e => e.innerText.trim()).filter(Boolean).join(' | ');
+    return falhar(item, aviso ? 'A Sefaz respondeu: ' + aviso.slice(0, 200)
+      : 'A Sefaz voltou para o formulário sem mostrar o resultado. Confira a inscrição estadual da empresa.');
   }
 
   async function pedirDownload(item) {
