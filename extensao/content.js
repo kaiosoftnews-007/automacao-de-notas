@@ -114,7 +114,8 @@
       for (const e of emps) for (const tipo of ['entrada', 'saida']) {
         if (!e[`baixar_${tipo}`] || !so(e.ie)) continue;
         fila.push({ empresa_id: e.id, ie: so(e.ie), nome: e.razao_social,
-          destino: (e.pasta || `${(rot?.pasta_destino || 'C:\\Notas').replace(/[\\/]+$/, '')}\\${limpo(e.codigo ? `${e.codigo} - ${e.razao_social}` : e.razao_social)}`).replace(/[\\/]+$/, ''),
+          pastaEmpresa: (e.pasta || '').replace(/[\\/]+$/, ''), codigo: e.codigo || '',
+          mae: (rot?.pasta_destino || 'C:\\Notas').replace(/[\\/]+$/, ''),
           tipo, modelo: e.modelo, canceladas: e.exibir_canceladas, eventos: e.incluir_eventos, etapa: 'pendente' });
       }
       if (!fila.length) return dizer(ie ? `Não achei empresa ativa com a IE ${ie} nesse escritório.` : 'Nenhuma empresa ativa com inscrição estadual nesse escritório.');
@@ -235,9 +236,14 @@
       const mmaaaa = st.comp.slice(5, 7) + st.comp.slice(0, 4);   // ex.: 102026
       // O Chrome só salva em Downloads: o ZIP vai para Notas Sefaz\_organizar com um .destino.txt ao lado,
       // e o organizador do Windows move para a pasta da empresa.
-      const final = `${item.destino}\\${mmaaaa}\\${item.tipo === 'entrada' ? 'Entrada' : 'Saida'}_${mmaaaa}.zip`;
+      // Sem pasta no cadastro, o organizador procura dentro da pasta mãe uma pasta com o código ou o nome
+      // da empresa; se não achar, cria "código - nome".
+      const nomeArq = `${mmaaaa}\\${item.tipo === 'entrada' ? 'Entrada' : 'Saida'}_${mmaaaa}.zip`;
+      const final = item.pastaEmpresa ? `${item.pastaEmpresa}\\${nomeArq}`
+        : `${item.mae}\\${limpo(item.codigo ? `${item.codigo} - ${item.nome}` : item.nome)}\\${nomeArq}`;
       const arq = `Notas Sefaz/_organizar/${item.ie}_${item.tipo}_${mmaaaa}.zip`;
-      await bg({ tipo: 'gravarDestino', nome: arq + '.destino.txt', texto: final });
+      const guia = [`pasta=${item.pastaEmpresa}`, `mae=${item.mae}`, `codigo=${item.codigo}`, `nome=${item.nome}`, `arquivo=${nomeArq}`].join('\r\n');
+      await bg({ tipo: 'gravarDestino', nome: arq + '.destino.txt', texto: guia });
       await bg({ tipo: 'nomeDownload', nome: arq });
       item.etapa = 'baixado'; await gravar(st);
       await banco(item, { status: 'concluido', qtd_notas: item.n, arquivo: final, mensagem: null });

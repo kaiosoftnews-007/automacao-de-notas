@@ -535,7 +535,7 @@ async function telaEmpresa(id, params) {
             <label class="f">Notas canceladas<select name="exibir_canceladas"><option value="false">Não exibir</option><option value="true" ${emp.exibir_canceladas ? 'selected' : ''}>Exibir</option></select></label></div></div>
           <label class="f">Pasta da empresa no computador
             <input name="pasta" value="${h(emp.pasta)}" placeholder="${h((rot?.pasta_destino || 'C:\\Notas') + '\\' + (emp.codigo ? emp.codigo + ' - ' : '') + (emp.razao_social || 'Empresa'))}">
-            <span class="sub" style="font-weight:400">Ex.: C:\\Clientes\\${h(emp.codigo ? emp.codigo + ' - ' : '')}${h(emp.razao_social || 'Empresa')}. Dentro dela a automação cria a pasta do mês (ex.: 102026) com Entrada_102026.zip e Saida_102026.zip. Em branco, usa a pasta principal da Rotina.</span>
+            <span class="sub" style="font-weight:400">Ex.: C:\\Clientes\\${h(emp.codigo ? emp.codigo + ' - ' : '')}${h(emp.razao_social || 'Empresa')}. Dentro dela a automação cria a pasta do mês (ex.: 102026) com Entrada_102026.zip e Saida_102026.zip. Em branco, procura (ou cria) a pasta da empresa dentro da pasta mãe da Rotina.</span>
           </label>
         </section>
         <section class="card pad" style="display:flex;flex-direction:column;gap:8px">
@@ -727,8 +727,8 @@ async function telaRotina(id) {
       </section>
       <section class="card pad" style="display:flex;flex-direction:column;gap:14px">
         <h2>Onde salvar e quem avisar</h2>
-        <label class="f">Pasta no computador<input name="pasta_destino" value="${h(r.pasta_destino)}"></label>
-        <div class="sub">O robô cria sozinho: Empresa → Competência → Entrada / Saída, já descompactado.</div>
+        <label class="f">Pasta mãe (onde ficam as pastas das empresas)<input name="pasta_destino" value="${h(r.pasta_destino)}" placeholder="C:\\Clientes"></label>
+        <div class="sub">Para cada empresa: usa a pasta do cadastro dela; sem pasta no cadastro, procura aqui dentro uma pasta com o código ou o nome da empresa e, se não achar, cria "código - nome". Dentro, cria a pasta do mês (ex.: 102026) com Entrada_102026.zip e Saida_102026.zip.</div>
         <label class="chk"><input type="checkbox" name="avisar_email" ${r.avisar_email ? 'checked' : ''}>Avisar por e-mail quando der erro</label>
         <label class="chk"><input type="checkbox" name="resumo_diario" ${r.resumo_diario ? 'checked' : ''}>Resumo diário: empresa, notas de entrada e de saída</label>
         <label class="chk"><input type="checkbox" name="avisar_whatsapp" ${r.avisar_whatsapp ? 'checked' : ''}>Avisar por WhatsApp</label>

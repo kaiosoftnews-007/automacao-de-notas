@@ -1,7 +1,12 @@
 ﻿# Organizador da Automação de Notas
 # O Chrome só salva arquivos na pasta Downloads. A extensão baixa cada ZIP para
-# Downloads\Notas Sefaz\_organizar com um arquivo .destino.txt ao lado, que diz para onde ele vai.
-# Este script fica rodando escondido e move cada ZIP para a pasta da empresa (ex.: ...\102026\Entrada_102026.zip).
+# Downloads\Notas Sefaz\_organizar com um arquivo .destino.txt ao lado, que diz para onde ele vai:
+#   pasta=   pasta da empresa no cadastro (pode estar vazia)
+#   mae=     pasta mãe da Rotina (onde ficam as pastas das empresas)
+#   codigo=  código da empresa     nome= razão social
+#   arquivo= 102026\Entrada_102026.zip
+# Sem pasta no cadastro, procura dentro da pasta mãe uma pasta com o código ou o nome da empresa;
+# se não achar, cria "código - nome". Depois cria a pasta do mês e move o ZIP para lá.
 $mutex = New-Object System.Threading.Mutex($false, 'Local\AutomacaoNotasOrganizador')
 if (-not $mutex.WaitOne(0)) { exit }   # já está rodando
 
@@ -11,15 +16,47 @@ $pastaLog = Join-Path $env:LOCALAPPDATA 'AutomacaoNotas'
 New-Item -ItemType Directory -Force -Path $pastaLog | Out-Null
 $log = Join-Path $pastaLog 'organizador.log'
 function Anotar($t) { Add-Content -LiteralPath $log -Value ("{0:dd/MM HH:mm:ss} {1}" -f (Get-Date), $t) -Encoding UTF8 }
-Anotar "iniciado (vigiando $base)"
 
+function Normal($t) {
+  $d = ([string]$t).Normalize([Text.NormalizationForm]::FormD)
+  $s = -join ($d.ToCharArray() | Where-Object { [Globalization.CharUnicodeInfo]::GetUnicodeCategory($_) -ne 'NonSpacingMark' })
+  return (($s.ToUpperInvariant() -replace '[^A-Z0-9]+', ' ').Trim())
+}
+function Limpo($t) { return (($t -replace '[\\/:*?"<>|]+', ' ') -replace '\s+', ' ').Trim() }
+
+function PastaDaEmpresa($g) {
+  if ($g.pasta) { return $g.pasta }
+  $mae = $g.mae
+  New-Item -ItemType Directory -Force -Path $mae | Out-Null
+  $pastas = Get-ChildItem -LiteralPath $mae -Directory -ErrorAction SilentlyContinue
+  if ($g.codigo) {
+    $cod = [regex]::Escape(($g.codigo.Trim() -replace '^0+', ''))
+    $p = $pastas | Where-Object { (Normal $_.Name) -match "^0*$cod(\D|$)" } | Select-Object -First 1
+    if ($p) { return $p.FullName }
+  }
+  $nome = Normal $g.nome
+  if ($nome) {
+    $p = $pastas | Where-Object { $n = Normal $_.Name; $n -eq $nome -or $n.EndsWith(" $nome") -or $n.Contains($nome) } | Select-Object -First 1
+    if ($p) { return $p.FullName }
+  }
+  $novo = if ($g.codigo) { "$($g.codigo.Trim()) - $($g.nome)" } else { $g.nome }
+  return (Join-Path $mae (Limpo $novo))
+}
+
+Anotar "iniciado (vigiando $base)"
 while ($true) {
   if (Test-Path -LiteralPath $base) {
     foreach ($guia in Get-ChildItem -LiteralPath $base -Filter '*.destino.txt' -File) {
       $zip = $guia.FullName -replace '\.destino\.txt$', ''
       if (-not (Test-Path -LiteralPath $zip) -or (Test-Path -LiteralPath "$zip.crdownload")) { continue }
       try {
-        $destino = (Get-Content -LiteralPath $guia.FullName -Raw -Encoding UTF8).Trim()
+        $g = @{}
+        foreach ($linha in Get-Content -LiteralPath $guia.FullName -Encoding UTF8) {
+          $i = $linha.IndexOf('=')
+          if ($i -gt 0) { $g[$linha.Substring(0, $i).Trim()] = $linha.Substring($i + 1).Trim() }
+        }
+        if (-not $g.arquivo) { throw 'guia sem o campo arquivo' }
+        $destino = Join-Path (PastaDaEmpresa $g) $g.arquivo
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destino) | Out-Null
         Move-Item -LiteralPath $zip -Destination $destino -Force
         Remove-Item -LiteralPath $guia.FullName -Force
