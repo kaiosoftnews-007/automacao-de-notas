@@ -239,8 +239,14 @@ function statusDownload(b, emp) {
 const qtd = (b, emp, tipo) => { const d = b.dlMap[emp.id + tipo]; return d && d.status !== 'erro' ? (d.qtd_notas ?? 0) : null; };
 
 async function pedirExecucao(escritorioId) {
-  await q(sb.from('execucoes').insert({ escritorio_id: escritorioId, origem: 'manual', status: 'pendente' }));
-  toast('Pedido enviado. O robô começa em instantes.');
+  const exe = await q(sb.from('execucoes').insert({ escritorio_id: escritorioId, origem: 'manual', status: 'pendente' }).select('id').single());
+  if (document.documentElement.dataset.automacaoNotas) {
+    // Extensão do Chrome instalada: ela abre a Sefaz e baixa as notas desse escritório.
+    window.postMessage({ tipo: 'automacao-notas:executar', escritorio_id: escritorioId, execucao_id: exe.id }, location.origin);
+    toast('Abrindo a Sefaz numa aba nova. Se pedir login, entre e abra "Baixar XML NFE" — o download começa sozinho.');
+  } else {
+    toast('Pedido enviado. Instale a extensão "Automação de Notas" no Chrome (ou ligue o robô) para baixar.');
+  }
 }
 
 // ---------- painel geral (admin) ----------

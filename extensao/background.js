@@ -1,0 +1,60 @@
+// Fala com o painel (Supabase) usando o login do site e dá nome/pasta aos ZIPs baixados.
+const URL_SB = 'https://ankmyrxwxaevxmorfedd.supabase.co';
+const CHAVE = 'sb_publishable_t18I7bwPJR3vH25OhbfpDA_dB99c4sR';
+const get = (k) => new Promise(r => chrome.storage.local.get(k, r));
+const set = (o) => new Promise(r => chrome.storage.local.set(o, r));
+
+async function auth(corpo, tipo) {
+  const r = await fetch(`${URL_SB}/auth/v1/token?grant_type=${tipo}`, {
+    method: 'POST', headers: { apikey: CHAVE, 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error_description || j.msg || j.message || 'Login recusado');
+  const sessao = { access: j.access_token, refresh: j.refresh_token, expira: Date.now() + (j.expires_in - 60) * 1000, email: j.user?.email };
+  await set({ sessao });
+  return sessao;
+}
+
+async function token() {
+  let { sessao } = await get('sessao');
+  if (!sessao) throw new Error('Entre com o login do painel (ícone da extensão).');
+  if (Date.now() > sessao.expira) sessao = await auth({ refresh_token: sessao.refresh }, 'refresh_token');
+  return sessao.access;
+}
+
+async function api({ metodo = 'GET', caminho, corpo, prefer }) {
+  const r = await fetch(`${URL_SB}/rest/v1/${caminho}`, {
+    method: metodo,
+    headers: { apikey: CHAVE, Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json', ...(prefer ? { Prefer: prefer } : {}) },
+    body: corpo ? JSON.stringify(corpo) : undefined });
+  const txt = await r.text();
+  if (!r.ok) throw new Error(`${r.status}: ${txt.slice(0, 200)}`);
+  return txt ? JSON.parse(txt) : null;
+}
+
+chrome.runtime.onMessage.addListener((m, _s, responder) => {
+  (async () => {
+    if (m.tipo === 'login') return auth({ email: m.email, password: m.senha }, 'password').then(s => ({ email: s.email }));
+    if (m.tipo === 'sair') return set({ sessao: null });
+    if (m.tipo === 'api') return api(m);
+    if (m.tipo === 'nomeDownload') return set({ proximoNome: { nome: m.nome, ate: Date.now() + 120000 } });
+    if (m.tipo === 'executar') {
+      const [esc] = await api({ caminho: `escritorios?select=id,nome&id=eq.${m.escritorio_id}` });
+      if (!esc) throw new Error('Escritório não encontrado para este login.');
+      await set({ escritorio: esc, pedido: { escritorio_id: esc.id, execucao_id: m.execucao_id, em: Date.now() } });
+      await chrome.tabs.create({ url: 'https://nfeweb.sefaz.go.gov.br/nfeweb/sites/nfe/consulta-notas-recebidas' });
+      return true;
+    }
+    if (m.tipo === 'avisar') return chrome.notifications.create({ type: 'basic', iconUrl: 'icone.png', title: 'Automação de Notas', message: m.texto });
+  })().then(ok => responder({ ok }), e => responder({ erro: e.message }));
+  return true;
+});
+
+// O ZIP do histórico da Sefaz vai para Downloads\Notas Sefaz\<empresa>\<mês>\<Entrada|Saida>\
+chrome.downloads.onDeterminingFilename.addListener((item, sugerir) => {
+  if (!/sefaz\.go\.gov\.br/.test(item.url + ' ' + (item.referrer || ''))) return;
+  get('proximoNome').then(({ proximoNome: p }) => {
+    if (p && Date.now() < p.ate) { set({ proximoNome: null }); sugerir({ filename: p.nome, conflictAction: 'uniquify' }); }
+    else sugerir();
+  });
+  return true;
+});
