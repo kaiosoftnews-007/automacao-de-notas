@@ -2,6 +2,8 @@
 
 Download automático dos XMLs de NF-e no portal da Sefaz Goiás e painel de controle para escritórios contábeis.
 
+> **Mapa para fazer alterações:** [docs/MAPA-DO-PROJETO.md](docs/MAPA-DO-PROJETO.md)
+
 ## Partes do sistema
 
 - **web/**: site com painel geral (admin), painel por escritório, cadastro de empresas e acompanhamento das entregas
