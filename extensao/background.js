@@ -77,6 +77,11 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
       await chrome.downloads.download({ url: 'data:text/plain;charset=utf-8,' + encodeURIComponent(m.texto), filename: m.nome, conflictAction: 'overwrite', saveAs: false });
       return true;
     }
+    if (m.tipo === 'clicar') {
+      await chrome.scripting.executeScript({ target: { tabId: remetente.tab.id, frameIds: [remetente.frameId ?? 0] }, world: 'MAIN',
+        func: () => { const e = document.querySelector('[data-an-clicar]'); if (e) { e.removeAttribute('data-an-clicar'); e.click(); } } });
+      return true;
+    }
     if (m.tipo === 'avisar') return chrome.notifications.create({ type: 'basic', iconUrl: 'icone.png', title: 'Automação de Notas', message: m.texto });
   })().then(ok => responder({ ok }), e => responder({ erro: e.message }));
   return true;

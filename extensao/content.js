@@ -154,6 +154,9 @@
     $$(sel).filter(e => visivel(e) && !caixa.contains(e) && re.test((e.innerText || e.value || '').trim()))
       .sort((a, b) => (a.innerText || '').length - (b.innerText || '').length);
 
+  const clicar = async el => { $$('[data-an-clicar]').forEach(x => x.removeAttribute('data-an-clicar'));
+    el.setAttribute('data-an-clicar', '1'); await bg({ tipo: 'clicar' }).catch(() => el.click()); };
+
   // ---------------------------------------------------------------- consultas
   async function falhar(item, msg) { item.etapa = 'erro'; item.msg = msg; await banco(item, { status: 'erro', mensagem: msg.slice(0, 400) }); return irForm(); }
 
@@ -171,7 +174,7 @@
     if (!(await esperarVerificacao('#filtro'))) return dizer((await ler())?.rodando ? 'Ninguém clicou na verificação em 10 min. Clique em Continuar quando puder.' : 'Pausado.');
     const b = $('#btnPesquisar'); if (!b) throw new Error('botão Pesquisar não encontrado');
     item.clicou = true; await gravar(st); dizer(`${item.nome} · ${item.tipo}: consultando...`);
-    b.click();
+    await clicar(b);
     await dorme(4000); lerResultado(item);     // se a tela não recarregar, lê daqui mesmo
   }
 
@@ -194,13 +197,13 @@
   async function pedirDownload(item) {
     const todos = porTexto(/Baixar todos os arquivos/i, 'button,a,input[type=button],input[type=submit]')[0];
     if (!todos) return falhar(item, `Achei ${item.n} nota(s), mas não o botão "Baixar todos os arquivos".`);
-    todos.click(); await dorme(1200);
+    await clicar(todos); await dorme(1200);
     const opcao = porTexto(item.eventos ? /Baixar documentos e eventos/i : /Baixar somente documentos/i)[0];
     if (opcao) { (opcao.htmlFor ? document.getElementById(opcao.htmlFor) : $('input', opcao) || opcao).click(); await dorme(600); }
     const baixar = porTexto(/^Baixar$/i, 'button,a,input[type=button],input[type=submit]').pop();
     if (!baixar) return falhar(item, 'Não achei o botão "Baixar" para confirmar o pedido.');
     item.etapa = 'pedindo'; item.pedidoEm = Date.now(); await gravar(st);
-    baixar.click(); await dorme(5000);
+    await clicar(baixar); await dorme(5000);
     return pedido(item);                         // se a tela recarregar antes, o passo() faz isto
   }
 
@@ -214,7 +217,7 @@
     if (!st.histAberto && $('#btnHistoricoDownload')) {
       dizer('Abrindo o Histórico de Downloads (aguardando a verificação)...');
       if (!(await esperarVerificacao('#historicoDownload'))) return dizer('Aguardando alguém clicar na verificação. Depois clique em Continuar.');
-      st.histAberto = true; await gravar(st); $('#btnHistoricoDownload').click();
+      st.histAberto = true; await gravar(st); await clicar($('#btnHistoricoDownload'));
       await dorme(6000); return historico();
     }
     st.histAberto = false;
@@ -248,7 +251,7 @@
       item.etapa = 'baixado'; await gravar(st);
       await banco(item, { status: 'concluido', qtd_notas: item.n, arquivo: final, mensagem: null });
       dizer(`Baixando ${item.nome} · ${item.tipo}...`);
-      link.click(); await dorme(5000);
+      await clicar(link); await dorme(5000);
     }
     if (!pend().length) return concluir();
     if (++st.tentHist > MAX_HIST) {

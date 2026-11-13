@@ -46,6 +46,10 @@
     return n <= max;
   }
 
+  // Clica pelo próprio site: os menus da Sefaz usam links "javascript:", que o Chrome bloqueia se o clique vier da extensão.
+  const clicar = async el => { document.querySelectorAll('[data-an-clicar]').forEach(x => x.removeAttribute('data-an-clicar'));
+    el.setAttribute('data-an-clicar', '1'); await msg({ tipo: 'clicar' }); };
+
   const setar = (e, v) => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, v);
     ['input', 'change', 'blur'].forEach(t => e.dispatchEvent(new Event(t, { bubbles: true })));
@@ -111,7 +115,7 @@
       await dorme(600);
       const botao = [...document.querySelectorAll('button,input[type=submit],input[type=button],a')]
         .find(b => visivel(b) && /autenticar|entrar/i.test(b.innerText || b.value || ''));
-      if (botao) botao.click(); else sen.form?.requestSubmit?.() || sen.form?.submit();
+      if (botao) await clicar(botao); else sen.form?.requestSubmit?.() || sen.form?.submit();
       await dorme(5000);
       if (![...document.querySelectorAll('input[type=password]')].some(visivel)) return;   // entrou
       if (recusou()) break;                                      // senha errada de verdade: não insiste
@@ -148,7 +152,7 @@
     }
     if (!(await conta('cliques', 4))) return faixa('não consegui abrir "Baixar XML NFE". Clique no menu que eu continuo.');
     faixa('abrindo Baixar XML NFE...');
-    (alvo.querySelector('a') || alvo).click();
+    await clicar(alvo.querySelector('a') || alvo);
     return;
   }
 
@@ -164,6 +168,6 @@
     if (!card) return irPara(PORTAL, 'abrindo o portal da Sefaz...');
     if (!(await conta('cliques', 4))) return faixa('não consegui abrir o Acesso Restrito. Clique no card que eu continuo.');
     faixa('abrindo o Acesso Restrito...');
-    (card.closest('a') || card).click();
+    await clicar(card.closest('a') || card);
   }
 })();
