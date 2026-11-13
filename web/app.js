@@ -266,10 +266,11 @@ function pcEscolhido(es, pcs) {
 }
 function seletorPc(es, pcs) {
   const outros = pcs.filter(p => p.id !== meuPc());
-  if (!outros.length) return '';   // nenhum outro computador com a extensão: tudo como antes
+  if (!pcs.length) return '';   // nenhum computador com a extensão cadastrado: tudo como antes
   const atual = pcEscolhido(es, pcs);
+  const este = pcs.find(p => p.id === meuPc());
   return `<label class="f">Baixar em<select id="pc" style="min-width:230px">
-    ${temExtensaoAqui() ? `<option value="" ${atual === '' ? 'selected' : ''}>Este computador</option>` : ''}
+    ${temExtensaoAqui() ? `<option value="" ${atual === '' ? 'selected' : ''}>● Este computador${este ? ` (${h(este.nome)})` : ''}</option>` : ''}
     ${outros.map(p => `<option value="${p.id}" ${p.id === atual ? 'selected' : ''}>${pcOnline(p) ? '●' : '○'} ${h(p.nome)} (${pcOnline(p) ? 'online' : 'offline'})</option>`).join('')}
   </select></label>`;
 }
