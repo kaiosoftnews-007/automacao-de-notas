@@ -22,7 +22,7 @@ window.addEventListener('message', e => {
   try {
     enviarSessao();
     chrome.runtime.sendMessage({ tipo: 'executar', escritorio_id: e.data.escritorio_id, execucao_id: e.data.execucao_id,
-      ie: e.data.ie || null, abriu: !!e.data.abriu }, r => {
+      ie: e.data.ie || null, comp: e.data.comp || null, abriu: !!e.data.abriu }, r => {
       const m = chrome.runtime.lastError?.message || r?.erro;
       if (m) erro(m);
     });

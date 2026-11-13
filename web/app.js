@@ -248,7 +248,7 @@ async function pedirExecucao(escritorioId, ie = null) {
   const exe = await q(sb.from('execucoes').insert({ escritorio_id: escritorioId, origem: 'manual', status: 'pendente' }).select('id').single());
   if (temExtensao) {
     // Extensão do Chrome instalada: ela faz o login na Sefaz e baixa as notas.
-    const pedido = { escritorio_id: escritorioId, execucao_id: exe.id, ie };
+    const pedido = { escritorio_id: escritorioId, execucao_id: exe.id, ie, comp: st.comp };   // competência escolhida no painel
     window.postMessage({ tipo: 'automacao-notas:executar', ...pedido, abriu: !!aba }, location.origin);
     if (aba) aba.location.href = 'https://portal.sefaz.go.gov.br/portalsefaz-apps/#automacao=' + encodeURIComponent(JSON.stringify(pedido));
     toast('Abrindo a Sefaz numa aba nova. Se pedir login, entre e abra "Baixar XML NFE" — o download começa sozinho.');

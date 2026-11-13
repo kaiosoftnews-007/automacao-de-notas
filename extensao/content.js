@@ -96,7 +96,7 @@
     try { await bg({ tipo: 'api', metodo: 'PATCH', caminho: `execucoes?id=eq.${st.execucao_id}`, corpo: dados }); } catch (_) {}
   }
 
-  async function iniciar(execucao_id = null) {
+  async function iniciar(execucao_id = null, compPedida = null) {
     if (typeof execucao_id !== 'string') execucao_id = null;
     try {
       const { sessao, escritorio } = await chrome.storage.local.get(['sessao', 'escritorio']);
@@ -107,8 +107,14 @@
       const emps = await bg({ tipo: 'api', caminho: `empresas?select=*&escritorio_id=eq.${escritorio.id}&ativa=eq.true&ie=not.is.null&order=razao_social${ie ? `&ie=eq.${ie}` : ''}` });
       const rot = (await bg({ tipo: 'api', caminho: `rotinas?select=periodo,pasta_destino&escritorio_id=eq.${escritorio.id}` }))[0];
       const h = new Date(), atual = rot?.periodo === 'mes_atual';
-      const ini = new Date(h.getFullYear(), h.getMonth() - (atual ? 0 : 1), 1);
-      const fim = atual ? h : new Date(h.getFullYear(), h.getMonth(), 0);
+      let ini = new Date(h.getFullYear(), h.getMonth() - (atual ? 0 : 1), 1);
+      let fim = atual ? h : new Date(h.getFullYear(), h.getMonth(), 0);
+      const mc = String(compPedida || '').match(/^(\d{4})-(\d{2})/);   // competência escolhida no painel
+      if (mc) {
+        ini = new Date(+mc[1], +mc[2] - 1, 1);
+        const ultimo = new Date(+mc[1], +mc[2], 0);
+        fim = ultimo > h ? h : ultimo;
+      }
       const br = d => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
       const fila = [];
       for (const e of emps) for (const tipo of ['entrada', 'saida']) {
@@ -335,7 +341,7 @@
         try { esc = (await bg({ tipo: 'api', caminho: `escritorios?select=id,nome&id=eq.${pedido.escritorio_id}` }))[0] || esc; } catch (_) {}
         await chrome.storage.local.set({ escritorio: esc });
       }
-      montar(); $('#an-ie', caixa).value = pedido.ie || ''; return iniciar(pedido.execucao_id);
+      montar(); $('#an-ie', caixa).value = pedido.ie || ''; return iniciar(pedido.execucao_id, pedido.comp);
     }
     if ($('#cmpNumIeDest') || $('#btnHistoricoDownload') || (await ler())?.rodando) passo();
   }, 600);
