@@ -123,6 +123,7 @@ function carregarMenu(forcar = false) {
   st.menuP = Promise.all([
     sb.from('alertas').select('id', { count: 'exact', head: true }).is('resolvido_em', null),
     sb.from('robo_status').select('ultimo_sinal').eq('id', 'principal').maybeSingle(),
+    sb.from('computadores').select('*').order('nome'),
   ]);
   return st.menuP;
 }
@@ -135,7 +136,9 @@ function mostrarCarregando() {
 }
 
 async function layout(ativo, conteudo) {
-  const [{ count }, robo] = await carregarMenu();
+  const [{ count }, robo, pcsR] = await carregarMenu();
+  const pcs = pcsR?.data || [], pcsOn = pcs.filter(pcOnline);
+  const parados = pcs.filter(p => p.verificacao_desde && pcOnline(p));
   const online = robo.data?.ultimo_sinal && (Date.now() - new Date(robo.data.ultimo_sinal)) < 5 * 60 * 1000;
   const itens = eAdmin()
     ? [['#/', 'Painel geral', 'painel'], ['#/entregas', 'Visão de entregas', 'entregas'], ['#/escritorios', 'Escritórios', 'escritorios'],
@@ -151,12 +154,15 @@ async function layout(ativo, conteudo) {
       <div class="me">
         <div class="robo"><span class="dot ${online ? 'on' : ''}"></span>Robô ${online ? 'online' : 'offline'}</div>
         <div>${robo.data?.ultimo_sinal ? 'Último sinal: ' + quando(robo.data.ultimo_sinal) : 'Robô ainda não instalado'}</div>
+        ${pcs.length ? `<div class="robo" style="border-top:1px solid #34507E;padding-top:8px"><span class="dot ${pcsOn.length ? 'on' : ''}"></span>Extensões: ${pcsOn.length} online</div>
+        <div style="font-size:12px">${pcs.map(p => `${h(p.nome)} ${pcOnline(p) ? '●' : '○'}`).join(' · ')}</div>` : ''}
         <div style="border-top:1px solid #34507E;padding-top:8px">${h(st.perfil.nome || st.perfil.email)}</div>
         <button type="button" id="sair">Sair</button>
       </div>
     </aside>
     <main>
       <button type="button" class="btn menu-btn" id="menu" aria-label="Abrir menu">☰</button>
+      ${parados.map(p => `<div class="card" style="background:var(--err-bg);border-color:#F1B8B2;padding:14px 18px;color:#7A1A12;font-size:14px"><b>${h(p.nome)} parou na verificação "Confirme que é humano".</b> Entre por acesso remoto nele e clique na caixinha da aba da Sefaz; o download continua sozinho.</div>`).join('')}
       ${conteudo}
     </main>
   </div>`;
@@ -242,9 +248,54 @@ window.addEventListener('message', e => {
   if (e.source === window && e.data?.tipo === 'automacao-notas:erro') toast('Extensão: ' + e.data.msg);
 });
 
+// ---------- computadores com a extensão (baixar em outro computador) ----------
+const pcOnline = p => !!p?.ultimo_sinal && Date.now() - new Date(p.ultimo_sinal) < 3 * 60 * 1000;
+const temExtensaoAqui = () => !!document.documentElement.dataset.automacaoNotas;
+const meuPc = () => document.documentElement.dataset.automacaoPc || null;   // extensão 3.8.0+ informa qual é este computador
+async function carregarPcs() { const { data } = await sb.from('computadores').select('*').order('nome'); return data || []; }
+const lerLocal = k => { try { return localStorage.getItem(k); } catch (_) { return null; } };
+const gravarLocal = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
+// '' = este computador; senão, id do computador escolhido
+function pcEscolhido(es, pcs) {
+  const outros = pcs.filter(p => p.id !== meuPc());
+  const salvo = lerLocal('automacao-pc:' + es.id) ?? es.pc_padrao ?? null;
+  if (salvo === '' && temExtensaoAqui()) return '';
+  if (salvo && outros.some(p => p.id === salvo)) return salvo;
+  if (temExtensaoAqui() || !outros.length) return '';
+  return (outros.find(pcOnline) || outros[0]).id;
+}
+function seletorPc(es, pcs) {
+  const outros = pcs.filter(p => p.id !== meuPc());
+  if (!outros.length) return '';   // nenhum outro computador com a extensão: tudo como antes
+  const atual = pcEscolhido(es, pcs);
+  return `<label class="f">Baixar em<select id="pc" style="min-width:230px">
+    ${temExtensaoAqui() ? `<option value="" ${atual === '' ? 'selected' : ''}>Este computador</option>` : ''}
+    ${outros.map(p => `<option value="${p.id}" ${p.id === atual ? 'selected' : ''}>${pcOnline(p) ? '●' : '○'} ${h(p.nome)} (${pcOnline(p) ? 'online' : 'offline'})</option>`).join('')}
+  </select></label>`;
+}
+function ligarSeletorPc(escritorioId) {
+  const sel = $('#pc'); if (!sel) return;
+  sel.onchange = async () => {
+    gravarLocal('automacao-pc:' + escritorioId, sel.value);
+    if (sel.value && eAdmin()) await sb.from('escritorios').update({ pc_padrao: sel.value }).eq('id', escritorioId);
+  };
+}
+
 async function pedirExecucao(escritorioId, ie = null) {
-  const temExtensao = !!document.documentElement.dataset.automacaoNotas;
-  const exe = await q(sb.from('execucoes').insert({ escritorio_id: escritorioId, origem: 'manual', status: 'pendente' }).select('id').single());
+  const pcs = await carregarPcs();
+  const { data: es } = await sb.from('escritorios').select('id,pc_padrao').eq('id', escritorioId).maybeSingle();
+  const alvo = pcEscolhido(es || { id: escritorioId }, pcs);
+  if (alvo) {
+    // Outro computador: o pedido fica no banco e a extensão de lá pega sozinha.
+    const pc = pcs.find(p => p.id === alvo);
+    await q(sb.from('execucoes').insert({ escritorio_id: escritorioId, origem: 'manual', status: 'aguardando_pc', pc_id: alvo, competencia: st.comp, ie }));
+    toast(pcOnline(pc)
+      ? `Pedido enviado ao ${pc.nome} (extensão online). O download começa em até 1 minuto; acompanhe na Rotina.`
+      : `${pc.nome} está offline (desligado ou com o Chrome fechado). O pedido fica guardado e roda quando ele ligar.`);
+    return;
+  }
+  const temExtensao = temExtensaoAqui();
+  const exe = await q(sb.from('execucoes').insert({ escritorio_id: escritorioId, origem: 'manual', status: 'pendente' }).select('id').single());   // igual à 3.7.7
   if (temExtensao) {
     // Extensão do Chrome instalada: ela faz o login na Sefaz e baixa as notas.
     const pedido = { escritorio_id: escritorioId, execucao_id: exe.id, ie, comp: st.comp };   // competência escolhida no painel
@@ -410,7 +461,7 @@ function pillSefaz(s) {
 // ---------- escritório ----------
 async function telaEscritorio(id, aba = 'empresas') {
   if (!eAdmin() && id !== st.perfil.escritorio_id) return go('#/escritorio/' + st.perfil.escritorio_id);
-  const [b, cred] = await Promise.all([carregarBase(id), q(sb.from('credenciais_sefaz').select('*').eq('escritorio_id', id).maybeSingle())]);
+  const [b, cred, pcs] = await Promise.all([carregarBase(id), q(sb.from('credenciais_sefaz').select('*').eq('escritorio_id', id).maybeSingle()), carregarPcs()]);
   const es = b.escritorios.find(e => e.id === id);
   if (!es) return layout('escritorios', '<div class="empty">Escritório não encontrado.</div>');
   let ne = 0, ns = 0, emDia = 0;
@@ -452,6 +503,7 @@ async function telaEscritorio(id, aba = 'empresas') {
       <div class="filters">
         <label class="f">Competência<select id="comp">${compOpcoes()}</select></label>
         <a class="btn" href="#/rotina/${id}" style="display:inline-flex;align-items:center;text-decoration:none">Rotina</a>
+        ${seletorPc(es, pcs)}
         <button type="button" class="btn" id="baixar">Baixar agora</button>
         <a class="btn p" href="#/empresa/novo?esc=${id}" style="display:inline-flex;align-items:center;text-decoration:none">+ Nova empresa</a>
         ${eAdmin() ? '<button type="button" class="btn" id="editarEsc">Editar escritório</button><button type="button" class="btn del-o" id="excluirEsc">Excluir escritório</button>' : ''}
@@ -472,6 +524,7 @@ async function telaEscritorio(id, aba = 'empresas') {
   $('#comp').onchange = e => { st.comp = e.target.value; telaEscritorio(id, aba); };
   $$('[data-aba]').forEach(t => t.onclick = () => telaEscritorio(id, t.dataset.aba));
   $$('tr.click').forEach(tr => tr.onclick = () => go(tr.dataset.href));
+  ligarSeletorPc(id);
   $('#baixar').onclick = () => pedirExecucao(id);
   $$('[data-baixar-ie]').forEach(bt => bt.onclick = ev => { ev.stopPropagation(); pedirExecucao(id, bt.dataset.baixarIe); });
   if ($('#editarEsc')) $('#editarEsc').onclick = async () => {
@@ -661,9 +714,10 @@ async function telaAlertas(f = { aba: 'abertos', tipo: '', esc: '' }) {
 
 // ---------- acesso à Sefaz ----------
 async function telaAcesso(params) {
-  const [escs, creds] = await Promise.all([
+  const [escs, creds, pcs] = await Promise.all([
     q(sb.from('escritorios').select('id,nome').order('nome')),
     q(sb.from('credenciais_sefaz').select('*')),
+    carregarPcs(),
   ]);
   const cm = Object.fromEntries(creds.map(c => [c.escritorio_id, c]));
   const selId = params.get('esc') || (eAdmin() ? escs[0]?.id : st.perfil.escritorio_id);
@@ -686,8 +740,20 @@ async function telaAcesso(params) {
         <button class="btn p" type="submit">Salvar</button>
         <div class="sub">A senha fica guardada criptografada. Depois de salva, ninguém consegue ver, só trocar.${c?.alterada_em ? `<br>Última alteração: ${new Date(c.alterada_em).toLocaleDateString('pt-BR')}` : ''}</div>
       </form>` : ''}
-    </div>`);
+    </div>
+    ${pcs.length ? `<section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Computadores com a extensão</h2><div class="sub" style="margin-top:4px">Aparecem em "Baixar em". Remova os que não usa mais; se a extensão for aberta de novo nele, ele volta para a lista.</div></div>
+      <table class="tbl"><thead><tr><th>Computador</th><th>Situação</th><th>Último sinal</th><th>Versão</th><th></th></tr></thead><tbody>
+      ${pcs.map(p => `<tr><td style="font-weight:600">${h(p.nome)}${p.id === meuPc() ? ' <span class="sub">(este)</span>' : ''}</td>
+        <td>${p.verificacao_desde && pcOnline(p) ? '<span class="pill er">Parado na verificação</span>' : pcOnline(p) ? '<span class="pill ok">Online</span>' : '<span class="pill na">Offline</span>'}</td>
+        <td>${quando(p.ultimo_sinal)}</td><td>${h(p.versao || '—')}</td>
+        <td style="text-align:right">${eAdmin() ? `<button type="button" class="btn s" data-tirar-pc="${p.id}" data-nome="${h(p.nome)}">Remover</button>` : ''}</td></tr>`).join('')}
+      </tbody></table></section>` : ''}`);
   $$('tr.click').forEach(tr => tr.onclick = () => go(tr.dataset.href));
+  $$('[data-tirar-pc]').forEach(bt => bt.onclick = async () => {
+    if (!confirm(`Remover "${bt.dataset.nome}" da lista de computadores?`)) return;
+    await q(sb.from('computadores').delete().eq('id', bt.dataset.tirarPc));
+    toast('Computador removido.'); carregarMenu(true); telaAcesso(params);
+  });
   if (!$('#f')) return;
   $('#ver').onchange = e => { $('[name=senha]').type = e.target.checked ? 'text' : 'password'; };
   $('#f').onsubmit = async e => {
@@ -702,18 +768,20 @@ async function telaAcesso(params) {
 
 // ---------- rotina ----------
 async function telaRotina(id) {
-  const [es, rot, exes] = await Promise.all([
-    q(sb.from('escritorios').select('id,nome').eq('id', id).maybeSingle()),
+  const [es, rot, exes, pcs] = await Promise.all([
+    q(sb.from('escritorios').select('id,nome,pc_padrao').eq('id', id).maybeSingle()),
     q(sb.from('rotinas').select('*').eq('escritorio_id', id).maybeSingle()),
     q(sb.from('execucoes').select('*').eq('escritorio_id', id).order('solicitada_em', { ascending: false }).limit(1)),
+    carregarPcs(),
   ]);
   if (!es) return naoEncontrado('Escritório não encontrado', 'Abra a rotina pela página do escritório.');
   const r = rot || { dias_semana: [1, 2, 3, 4, 5], horario: '06:00', periodo: 'mes_anterior', pasta_destino: 'C:\\Notas', tentativas: 3, avisar_email: true, resumo_diario: true, avisar_whatsapp: false, ativa: true };
   const ult = exes[0];
   const dls = ult ? await q(sb.from('downloads').select('*, empresas(razao_social,ie)').eq('execucao_id', ult.id).order('empresa_id')) : [];
-  const EXE = { pendente: ['pe', 'Aguardando robô'], rodando: ['pe', 'Rodando'], concluida: ['ok', 'Concluída'], com_erros: ['pe', 'Concluída com erros'], falhou: ['er', 'Falhou'] };
+  const nomePc = pcs.find(p => p.id === ult?.pc_id)?.nome;
+  const EXE = { pendente: ['pe', 'Aguardando robô'], aguardando_pc: ['pe', 'Aguardando o ' + (nomePc || 'computador escolhido')], rodando: ['pe', nomePc ? 'Rodando no ' + nomePc : 'Rodando'], concluida: ['ok', 'Concluída'], com_erros: ['pe', 'Concluída com erros'], falhou: ['er', 'Falhou'] };
   await layout('rotina', `
-    <div class="top"><div><div class="sub"><a href="#/escritorio/${id}">${h(es.nome)}</a></div><h1>Rotina automática</h1></div></div>
+    <div class="top"><div><div class="sub"><a href="#/escritorio/${id}">${h(es.nome)}</a></div><h1>Rotina automática</h1></div><div class="filters">${seletorPc(es, pcs)}</div></div>
     <form id="f" class="cols" style="grid-template-columns:1fr 1fr">
       <section class="card pad" style="display:flex;flex-direction:column;gap:16px">
         <h2>Quando rodar</h2>
@@ -737,9 +805,10 @@ async function telaRotina(id) {
       <div class="pad" style="padding-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h2>Última execução</h2>${ult ? `<span class="pill ${EXE[ult.status][0]}">${EXE[ult.status][1]}</span><span class="sub">${ult.origem === 'manual' ? 'Pedida manualmente' : 'Agendada'} · ${quando(ult.solicitada_em)}</span>` : ''}</div>
       ${dls.length ? `<table class="tbl"><thead><tr><th>Empresa</th><th>IE</th><th>Tipo</th><th class="c">Notas</th><th>Situação</th><th>Detalhe</th></tr></thead><tbody>
         ${dls.map(d => `<tr><td style="font-weight:600">${h(d.empresas?.razao_social)}</td><td>${h(d.empresas?.ie)}</td><td>${d.tipo === 'entrada' ? 'Entrada' : 'Saída'}</td><td class="c">${d.qtd_notas ?? '—'}</td><td><span class="pill ${ST_DL[d.status][0]}">${ST_DL[d.status][1]}</span></td><td class="sub">${h(d.mensagem || d.arquivo || '')}</td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">${ult ? 'Aguardando o robô começar.' : 'Nenhuma execução ainda.'}</div>`}
+      </tbody></table>` : `<div class="empty">${!ult ? 'Nenhuma execução ainda.' : ult.status === 'aguardando_pc' ? `O ${h(nomePc || 'computador escolhido')} pega o pedido em até 1 minuto e baixa em segundo plano. As notas ficam salvas nele.` : 'Aguardando o robô começar.'}</div>`}
     </section>`);
   $$('[data-dia]').forEach(bt => bt.onclick = () => { bt.classList.toggle('on'); bt.setAttribute('aria-pressed', bt.classList.contains('on')); });
+  ligarSeletorPc(id);
   $('#agora').onclick = async () => { await pedirExecucao(id); telaRotina(id); };
   $('#f').onsubmit = async e => {
     e.preventDefault();
