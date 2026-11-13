@@ -49,7 +49,8 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
     if (m.tipo === 'nomeDownload') return set({ proximoNome: { nome: m.nome, ate: Date.now() + 120000 } });
     if (m.tipo === 'executar') {
       await set({ pedido: { escritorio_id: m.escritorio_id, execucao_id: m.execucao_id, ie: m.ie || null, comp: m.comp || null, em: Date.now() } });
-      if (!m.abriu) await chrome.tabs.create({ url: 'https://portal.sefaz.go.gov.br/portalsefaz-apps/' });
+      // Abre a Sefaz numa aba em segundo plano: você continua na página em que está.
+      if (!m.abriu) await chrome.tabs.create({ url: 'https://portal.sefaz.go.gov.br/portalsefaz-apps/', active: false, index: 999 });
       const [esc] = await api({ caminho: `escritorios?select=id,nome&id=eq.${m.escritorio_id}` });
       if (!esc) throw new Error('este login da extensão não enxerga o escritório. Entre na extensão com o mesmo login do painel.');
       await set({ escritorio: esc });
@@ -125,6 +126,17 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
         } });
       return true;
     }
+    if (m.tipo === 'verificacao') {
+      await set({ abaVerificacao: { tab: remetente.tab.id, janela: remetente.tab.windowId } });
+      chrome.action.setBadgeText({ text: '!' }); chrome.action.setBadgeBackgroundColor({ color: '#B3261E' });
+      chrome.notifications.create('verificacao', { type: 'basic', iconUrl: 'icone.png', requireInteraction: true, priority: 2,
+        title: 'Sefaz: confirme que é humano', message: 'Clique aqui para abrir a aba da Sefaz e marcar a caixinha. Depois eu continuo sozinho.' });
+      return true;
+    }
+    if (m.tipo === 'verificacaoOk') {
+      chrome.action.setBadgeText({ text: '' }); chrome.notifications.clear('verificacao');
+      return true;
+    }
     if (m.tipo === 'avisar') return chrome.notifications.create({ type: 'basic', iconUrl: 'icone.png', title: 'Automação de Notas', message: m.texto });
   })().then(ok => responder({ ok }), e => responder({ erro: e.message }));
   return true;
@@ -138,4 +150,12 @@ chrome.downloads.onDeterminingFilename.addListener((item, sugerir) => {
     else sugerir();
   });
   return true;
+});
+
+// Clicar no aviso da verificação leva direto para a aba da Sefaz.
+chrome.notifications.onClicked.addListener(async id => {
+  if (id !== 'verificacao') return;
+  const { abaVerificacao: a } = await get('abaVerificacao');
+  if (a) { chrome.windows.update(a.janela, { focused: true }); chrome.tabs.update(a.tab, { active: true }); }
+  chrome.notifications.clear(id);
 });

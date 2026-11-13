@@ -141,10 +141,10 @@
     const t0 = Date.now(); let avisou = false;
     while (Date.now() - t0 < ESPERA_VERIFICACAO) {
       if (!(await ler())?.rodando) return false;
-      if (campo()?.value) return true;
-      if (!avisou && Date.now() - t0 > 30e3) {
+      if (campo()?.value) { if (avisou) bg({ tipo: 'verificacaoOk' }).catch(() => {}); return true; }
+      if (!avisou && Date.now() - t0 > 10e3) {
         avisou = true; dizer('A Sefaz pediu a verificação. Clique na caixinha "Confirme que é humano" que eu continuo.');
-        bg({ tipo: 'avisar', texto: 'A Sefaz pediu a verificação "Confirme que é humano". Clique na caixinha para continuar.' }).catch(() => {});
+        bg({ tipo: 'verificacao' }).catch(() => {});   // aviso fixo no canto da tela + "!" no ícone da extensão
       }
       await dorme(1000);
     }
