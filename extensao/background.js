@@ -39,7 +39,7 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
     if (m.tipo === 'nomeDownload') return set({ proximoNome: { nome: m.nome, ate: Date.now() + 120000 } });
     if (m.tipo === 'executar') {
       await set({ pedido: { escritorio_id: m.escritorio_id, execucao_id: m.execucao_id, ie: m.ie || null, em: Date.now() } });
-      if (!m.abriu) await chrome.tabs.create({ url: 'https://www.sefaz.go.gov.br/netaccess/000System/acessoRestrito/' });
+      if (!m.abriu) await chrome.tabs.create({ url: 'https://portal.sefaz.go.gov.br/portalsefaz-apps/' });
       const [esc] = await api({ caminho: `escritorios?select=id,nome&id=eq.${m.escritorio_id}` });
       if (!esc) throw new Error('este login da extensão não enxerga o escritório. Entre na extensão com o mesmo login do painel.');
       await set({ escritorio: esc });

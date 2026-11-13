@@ -3,7 +3,7 @@
 // A tela de consulta não abre por link direto (a Sefaz responde "sem permissão").
 // Usa o CPF e a senha da Sefaz guardados só neste Chrome. Nunca mexe na verificação "Confirme que é humano".
 (async () => {
-  const ACESSO = 'https://www.sefaz.go.gov.br/netaccess/000System/acessoRestrito/';
+  const PORTAL = 'https://portal.sefaz.go.gov.br/portalsefaz-apps/';
   const dorme = ms => new Promise(r => setTimeout(r, ms));
   const get = k => chrome.storage.local.get(k);
   const set = o => chrome.storage.local.set(o);
@@ -93,11 +93,17 @@
   }
 
   // 2) "Você não tem permissão" (link direto da consulta) → recomeça pelo Acesso Restrito
-  if (/n[ãa]o tem permiss[ãa]o/i.test(texto())) return irPara(ACESSO, 'abrindo o Acesso Restrito...');
+  if (/n[ãa]o tem permiss[ãa]o/i.test(texto())) return irPara(PORTAL, 'voltando ao portal da Sefaz...');
 
   // 3) Acesso Restrito (menu ou quadro interno): clica em "Baixar XML NFE"
   if (location.host === 'www.sefaz.go.gov.br' && /netaccess/i.test(location.pathname)) {
     await dorme(1200);
+    // Tela em branco do Acesso Restrito (aberto sem passar pelo portal): volta ao portal e entra pelo card.
+    if (topo && /loginPortal/i.test(location.pathname)) {
+      await dorme(4000);
+      if (/loginPortal/i.test(location.pathname) && !texto().trim()) return irPara(PORTAL, 'entrando pelo portal da Sefaz...');
+      return;
+    }
     const alvo = [...document.querySelectorAll('a,li,span,div,td')]
       .filter(e => visivel(e) && /^[:\s]*Baixar XML NFE\s*$/i.test(e.innerText || ''))
       .sort((a, b) => (a.tagName === 'A' ? -1 : 0) - (b.tagName === 'A' ? -1 : 0) || a.innerText.length - b.innerText.length)[0];
@@ -113,6 +119,18 @@
     return;
   }
 
-  // 4) Portal (logado, sem senha na tela) → Acesso Restrito
-  if (location.host === 'portal.sefaz.go.gov.br' && topo) return irPara(ACESSO, 'abrindo o Acesso Restrito...');
+  // 4) Portal (logado, sem senha na tela) → clica no card "Acesso Restrito" (abre a tela com o login já passado)
+  if (location.host === 'portal.sefaz.go.gov.br' && topo) {
+    let card = null;
+    for (let i = 0; i < 10 && !card; i++) {
+      card = [...document.querySelectorAll('a,div,span,h1,h2,h3,h4,h5,p')]
+        .filter(e => visivel(e) && /^\s*Acesso Restrito\s*$/i.test(e.innerText || ''))
+        .sort((a, b) => a.innerText.length - b.innerText.length)[0];
+      if (!card) await dorme(800);
+    }
+    if (!card) return irPara(PORTAL, 'abrindo o portal da Sefaz...');
+    if (!(await conta('cliques', 4))) return faixa('não consegui abrir o Acesso Restrito. Clique no card que eu continuo.');
+    faixa('abrindo o Acesso Restrito...');
+    (card.closest('a') || card).click();
+  }
 })();
