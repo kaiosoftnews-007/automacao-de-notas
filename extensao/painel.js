@@ -1,5 +1,5 @@
 // Roda no site do painel: avisa que a extensão está instalada e repassa o botão "Baixar".
-document.documentElement.dataset.automacaoNotas = '1';
+document.documentElement.dataset.automacaoNotas = chrome.runtime.getManifest().version;   // versão, para diagnóstico
 window.addEventListener('message', e => {
   if (e.source !== window || e.data?.tipo !== 'automacao-notas:executar') return;
   const erro = msg => window.postMessage({ tipo: 'automacao-notas:erro', msg }, location.origin);
