@@ -105,7 +105,7 @@
       dizer('Buscando as empresas no painel...');
       const ie = so($('#an-ie', caixa).value);
       const emps = await bg({ tipo: 'api', caminho: `empresas?select=*&escritorio_id=eq.${escritorio.id}&ativa=eq.true&ie=not.is.null&order=razao_social${ie ? `&ie=eq.${ie}` : ''}` });
-      const rot = (await bg({ tipo: 'api', caminho: `rotinas?select=periodo&escritorio_id=eq.${escritorio.id}` }))[0];
+      const rot = (await bg({ tipo: 'api', caminho: `rotinas?select=periodo,pasta_destino&escritorio_id=eq.${escritorio.id}` }))[0];
       const h = new Date(), atual = rot?.periodo === 'mes_atual';
       const ini = new Date(h.getFullYear(), h.getMonth() - (atual ? 0 : 1), 1);
       const fim = atual ? h : new Date(h.getFullYear(), h.getMonth(), 0);
@@ -113,7 +113,8 @@
       const fila = [];
       for (const e of emps) for (const tipo of ['entrada', 'saida']) {
         if (!e[`baixar_${tipo}`] || !so(e.ie)) continue;
-        fila.push({ empresa_id: e.id, ie: so(e.ie), nome: e.razao_social, pasta: limpo(e.codigo ? `${e.codigo} - ${e.razao_social}` : e.razao_social),
+        fila.push({ empresa_id: e.id, ie: so(e.ie), nome: e.razao_social,
+          destino: (e.pasta || `${(rot?.pasta_destino || 'C:\\Notas').replace(/[\\/]+$/, '')}\\${limpo(e.codigo ? `${e.codigo} - ${e.razao_social}` : e.razao_social)}`).replace(/[\\/]+$/, ''),
           tipo, modelo: e.modelo, canceladas: e.exibir_canceladas, eventos: e.incluir_eventos, etapa: 'pendente' });
       }
       if (!fila.length) return dizer(ie ? `Não achei empresa ativa com a IE ${ie} nesse escritório.` : 'Nenhuma empresa ativa com inscrição estadual nesse escritório.');
@@ -232,10 +233,14 @@
       usadas.add(tr);
       if (/erro|falh|expirad/i.test(tr.innerText)) { item.etapa = 'erro'; item.msg = 'A Sefaz não gerou o arquivo: ' + tr.innerText.replace(/\s+/g, ' ').slice(0, 100); await banco(item, { status: 'erro', mensagem: item.msg }); continue; }
       const mmaaaa = st.comp.slice(5, 7) + st.comp.slice(0, 4);   // ex.: 102026
-      const arq = `Notas Sefaz/${item.pasta}/${mmaaaa}/${item.tipo === 'entrada' ? 'Entrada' : 'Saida'}_${mmaaaa}.zip`;
+      // O Chrome só salva em Downloads: o ZIP vai para Notas Sefaz\_organizar com um .destino.txt ao lado,
+      // e o organizador do Windows move para a pasta da empresa.
+      const final = `${item.destino}\\${mmaaaa}\\${item.tipo === 'entrada' ? 'Entrada' : 'Saida'}_${mmaaaa}.zip`;
+      const arq = `Notas Sefaz/_organizar/${item.ie}_${item.tipo}_${mmaaaa}.zip`;
+      await bg({ tipo: 'gravarDestino', nome: arq + '.destino.txt', texto: final });
       await bg({ tipo: 'nomeDownload', nome: arq });
       item.etapa = 'baixado'; await gravar(st);
-      await banco(item, { status: 'concluido', qtd_notas: item.n, arquivo: 'Downloads/' + arq, mensagem: null });
+      await banco(item, { status: 'concluido', qtd_notas: item.n, arquivo: final, mensagem: null });
       dizer(`Baixando ${item.nome} · ${item.tipo}...`);
       link.click(); await dorme(5000);
     }
@@ -251,7 +256,7 @@
   async function concluir() {
     st.rodando = false; const c = e => st.fila.filter(i => i.etapa === e).length;
     await execucao({ status: !c('erro') ? 'concluida' : (c('erro') < st.fila.length ? 'com_erros' : 'falhou'), finalizada_em: new Date().toISOString() });
-    dizer(`Terminou: ${c('baixado')} baixados, ${c('sem_notas')} sem notas, ${c('erro')} com erro. Os ZIPs estão em Downloads\\Notas Sefaz.`);
+    dizer(`Terminou: ${c('baixado')} baixados, ${c('sem_notas')} sem notas, ${c('erro')} com erro. Os ZIPs vão para a pasta de cada empresa.`);
     await gravar(st); bg({ tipo: 'avisar', texto: st.msg }).catch(() => {});
   }
 

@@ -533,13 +533,10 @@ async function telaEmpresa(id, params) {
             <div style="display:flex;flex-direction:column;gap:12px">
             <label class="f">Modelo da NF-e<select name="modelo"><option value="todos" ${sel('todos', emp.modelo)}>Todos</option><option value="55" ${sel('55', emp.modelo)}>55 (NF-e)</option><option value="65" ${sel('65', emp.modelo)}>65 (NFC-e)</option></select></label>
             <label class="f">Notas canceladas<select name="exibir_canceladas"><option value="false">Não exibir</option><option value="true" ${emp.exibir_canceladas ? 'selected' : ''}>Exibir</option></select></label></div></div>
-          <div class="f">Onde as notas vão ficar no computador
-            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-              <div class="mono" style="flex:1;min-width:220px">${h(rot?.pasta_destino || 'C:\\Notas')}\\${h(emp.codigo ? emp.codigo + ' - ' : '')}${h(emp.razao_social || '[empresa]')}\\AAAA-MM\\Entrada</div>
-              <a class="btn o s" href="#/rotina/${emp.escritorio_id}" style="display:inline-flex;align-items:center;text-decoration:none">Alterar pasta</a>
-            </div>
-            <span class="sub" style="font-weight:400">A pasta principal vale para todas as empresas do escritório. O robô cria sozinho as subpastas de cada empresa e mês.</span>
-          </div>
+          <label class="f">Pasta da empresa no computador
+            <input name="pasta" value="${h(emp.pasta)}" placeholder="${h((rot?.pasta_destino || 'C:\\Notas') + '\\' + (emp.codigo ? emp.codigo + ' - ' : '') + (emp.razao_social || 'Empresa'))}">
+            <span class="sub" style="font-weight:400">Ex.: C:\\Clientes\\${h(emp.codigo ? emp.codigo + ' - ' : '')}${h(emp.razao_social || 'Empresa')}. Dentro dela a automação cria a pasta do mês (ex.: 102026) com Entrada_102026.zip e Saida_102026.zip. Em branco, usa a pasta principal da Rotina.</span>
+          </label>
         </section>
         <section class="card pad" style="display:flex;flex-direction:column;gap:8px">
           <h2>Entregas que essa empresa tem</h2>
@@ -567,6 +564,7 @@ async function telaEmpresa(id, params) {
       atividade: fd.get('atividade') || null, baixar_entrada: fd.has('baixar_entrada'), baixar_saida: fd.has('baixar_saida'),
       incluir_eventos: fd.has('incluir_eventos'), modelo: fd.get('modelo'), exibir_canceladas: fd.get('exibir_canceladas') === 'true',
       obrigacoes: OBRIG.map(([k]) => k).filter(k => fd.has('ob_' + k)),
+      pasta: (fd.get('pasta') || '').trim().replace(/[\\/]+$/, '') || null,
     };
     if (nova) await q(sb.from('empresas').insert(reg)); else await q(sb.from('empresas').update(reg).eq('id', id));
     toast('Empresa salva.'); go('#/escritorio/' + reg.escritorio_id);

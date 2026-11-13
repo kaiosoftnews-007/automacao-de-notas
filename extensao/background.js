@@ -73,6 +73,10 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
       });
       return r?.result;
     }
+    if (m.tipo === 'gravarDestino') {
+      await chrome.downloads.download({ url: 'data:text/plain;charset=utf-8,' + encodeURIComponent(m.texto), filename: m.nome, conflictAction: 'overwrite', saveAs: false });
+      return true;
+    }
     if (m.tipo === 'avisar') return chrome.notifications.create({ type: 'basic', iconUrl: 'icone.png', title: 'Automação de Notas', message: m.texto });
   })().then(ok => responder({ ok }), e => responder({ erro: e.message }));
   return true;
