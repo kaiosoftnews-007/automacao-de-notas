@@ -31,7 +31,7 @@ async function api({ metodo = 'GET', caminho, corpo, prefer }) {
   return txt ? JSON.parse(txt) : null;
 }
 
-chrome.runtime.onMessage.addListener((m, _s, responder) => {
+chrome.runtime.onMessage.addListener((m, remetente, responder) => {
   (async () => {
     if (m.tipo === 'login') return auth({ email: m.email, password: m.senha }, 'password').then(s => ({ email: s.email }));
     if (m.tipo === 'sair') return set({ sessao: null });
@@ -39,12 +39,13 @@ chrome.runtime.onMessage.addListener((m, _s, responder) => {
     if (m.tipo === 'nomeDownload') return set({ proximoNome: { nome: m.nome, ate: Date.now() + 120000 } });
     if (m.tipo === 'executar') {
       await set({ pedido: { escritorio_id: m.escritorio_id, execucao_id: m.execucao_id, ie: m.ie || null, em: Date.now() } });
-      if (!m.abriu) await chrome.tabs.create({ url: 'https://nfeweb.sefaz.go.gov.br/nfeweb/sites/nfe/consulta-notas-recebidas' });
+      if (!m.abriu) await chrome.tabs.create({ url: 'https://www.sefaz.go.gov.br/netaccess/000System/acessoRestrito/' });
       const [esc] = await api({ caminho: `escritorios?select=id,nome&id=eq.${m.escritorio_id}` });
       if (!esc) throw new Error('este login da extensão não enxerga o escritório. Entre na extensão com o mesmo login do painel.');
       await set({ escritorio: esc });
       return true;
     }
+    if (m.tipo === 'irPara') { if (remetente.tab?.id) await chrome.tabs.update(remetente.tab.id, { url: m.url }); return true; }
     if (m.tipo === 'avisar') return chrome.notifications.create({ type: 'basic', iconUrl: 'icone.png', title: 'Automação de Notas', message: m.texto });
   })().then(ok => responder({ ok }), e => responder({ erro: e.message }));
   return true;
