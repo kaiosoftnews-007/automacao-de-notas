@@ -47,8 +47,8 @@
   }
 
   // Clica pelo próprio site: os menus da Sefaz usam links "javascript:", que o Chrome bloqueia se o clique vier da extensão.
-  const clicar = async el => { document.querySelectorAll('[data-an-clicar]').forEach(x => x.removeAttribute('data-an-clicar'));
-    el.setAttribute('data-an-clicar', '1'); await msg({ tipo: 'clicar' }); };
+  const clicar = async (el, modo = '1') => { document.querySelectorAll('[data-an-clicar]').forEach(x => x.removeAttribute('data-an-clicar'));
+    el.setAttribute('data-an-clicar', modo); await msg({ tipo: 'clicar' }); };
 
   const setar = (e, v) => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, v);
@@ -168,6 +168,6 @@
     if (!card) return irPara(PORTAL, 'abrindo o portal da Sefaz...');
     if (!(await conta('cliques', 4))) return faixa('não consegui abrir o Acesso Restrito. Clique no card que eu continuo.');
     faixa('abrindo o Acesso Restrito...');
-    await clicar(card.closest('a') || card);
+    await clicar(card.closest('a') || card, 'card');
   }
 })();

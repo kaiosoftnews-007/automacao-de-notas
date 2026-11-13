@@ -82,6 +82,7 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
         func: () => {
           const e = document.querySelector('[data-an-clicar]');
           if (!e) return;
+          const modoCard = e.getAttribute('data-an-clicar') === 'card';
           e.removeAttribute('data-an-clicar');
           // O que abriria em janela nova (bloqueada como pop-up) abre nesta mesma aba.
           if (!window.__anAbrirAqui) {
@@ -93,6 +94,7 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
             };
           }
           document.querySelectorAll('a[target], form[target]').forEach(x => { if (x.target !== '_self') x.target = '_self'; });
+          if (!modoCard) { e.click(); return; }
           // Card inteiro (sobe até um bloco de tamanho de card)
           let card = e;
           while (card.parentElement && card.getBoundingClientRect().height < 80 && card.parentElement !== document.body) card = card.parentElement;
