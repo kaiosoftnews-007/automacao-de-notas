@@ -68,16 +68,17 @@
   // 1) Tela pedindo senha (login do portal ou "requer nova autenticação")
   const senha = [...document.querySelectorAll('input[type=password]')].find(visivel);
   if (senha) {
-    const { credSefaz = {} } = await get('credSefaz');
-    const c = credSefaz[esc];
+    const r = await msg({ tipo: 'credSefaz', escritorio_id: esc });
+    let c = r?.ok;
+    if (!c?.senha) c = ((await get('credSefaz')).credSefaz || {})[esc];   // reserva: senha salva no ícone da extensão
     if (!c?.senha) {
-      faixa('falta a senha da Sefaz. Clique no ícone da extensão e salve o CPF e a senha do contador.');
-      return avisar('Falta a senha da Sefaz: clique no ícone da extensão e salve.');
+      faixa('não achei o login da Sefaz deste escritório. Cadastre em "Acesso à Sefaz" no painel.');
+      return avisar('Login da Sefaz não encontrado: cadastre em Acesso à Sefaz no painel.' + (r?.erro ? ' (' + r.erro + ')' : ''));
     }
     if (!(await conta('login', 2))) {
-      faixa('a Sefaz não aceitou a senha salva. Confira o CPF e a senha no ícone da extensão.');
+      faixa('a Sefaz não aceitou o CPF e a senha. Confira em "Acesso à Sefaz" no painel.');
       await set({ pedido: null });
-      return avisar('A Sefaz recusou a senha salva na extensão.');
+      return avisar('A Sefaz recusou o login cadastrado no painel (Acesso à Sefaz).');
     }
     faixa('entrando na Sefaz...');
     const campos = [...document.querySelectorAll('input:not([type=hidden]):not([type=password]):not([type=checkbox]):not([type=radio])')].filter(visivel);
