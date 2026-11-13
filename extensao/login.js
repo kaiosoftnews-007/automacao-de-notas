@@ -75,20 +75,50 @@
       faixa('não achei o login da Sefaz deste escritório. Cadastre em "Acesso à Sefaz" no painel.');
       return avisar('Login da Sefaz não encontrado: cadastre em Acesso à Sefaz no painel.' + (r?.erro ? ' (' + r.erro + ')' : ''));
     }
-    if (!(await conta('login', 2))) {
+    if (!(await conta('login', 5))) {
       faixa('a Sefaz não aceitou o CPF e a senha. Confira em "Acesso à Sefaz" no painel.');
       await set({ pedido: null });
       return avisar('A Sefaz recusou o login cadastrado no painel (Acesso à Sefaz).');
     }
-    faixa('entrando na Sefaz...');
-    const campos = [...document.querySelectorAll('input:not([type=hidden]):not([type=password]):not([type=checkbox]):not([type=radio])')].filter(visivel);
-    const cpf = campos.find(e => /cpf/i.test(e.placeholder + e.name + e.id)) || campos[0];
-    if (cpf && !cpf.readOnly && cpf.value.replace(/\D/g, '') !== c.cpf) setar(cpf, c.cpf);
-    setar(senha, c.senha);
-    await dorme(400);
-    const botao = [...document.querySelectorAll('button,input[type=submit],input[type=button],a')]
-      .find(b => visivel(b) && /autenticar|entrar/i.test(b.innerText || b.value || ''));
-    if (botao) botao.click(); else senha.form?.requestSubmit?.() || senha.form?.submit();
+    // Digita como uma pessoa: o campo de CPF tem máscara e o preenchimento automático do Chrome
+    // não conta para o site (dá "informe um CPF válido"). Por isso sempre apaga e digita de novo.
+    const digitar = async (el, txt) => {
+      const setV = v => Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v);
+      el.focus(); el.click?.();
+      setV(''); el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+      for (const ch of txt) {
+        const k = { key: ch, bubbles: true };
+        el.dispatchEvent(new KeyboardEvent('keydown', k)); el.dispatchEvent(new KeyboardEvent('keypress', k));
+        setV(el.value + ch);
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' }));
+        el.dispatchEvent(new KeyboardEvent('keyup', k));
+        await dorme(35);
+      }
+      el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('blur', { bubbles: true }));
+    };
+    const recusou = () => /(senha|credenciais?)[^.\n]{0,40}(inv[aá]lid|incorret|n[aã]o confere)|bloquead/i.test(texto());
+    for (let tentativa = 1; tentativa <= 4; tentativa++) {
+      faixa(tentativa === 1 ? 'entrando na Sefaz...' : `entrando na Sefaz (tentativa ${tentativa})...`);
+      const campos = [...document.querySelectorAll('input:not([type=hidden]):not([type=password]):not([type=checkbox]):not([type=radio])')].filter(visivel);
+      const cpf = campos.find(e => /cpf/i.test(e.placeholder + e.name + e.id)) || campos[0];
+      const sen = [...document.querySelectorAll('input[type=password]')].find(visivel);
+      if (!sen) return;                                          // saiu da tela de login: deu certo
+      if (cpf && !cpf.readOnly && !cpf.disabled) await digitar(cpf, c.cpf);
+      await digitar(sen, c.senha);
+      await dorme(500);
+      const botao = [...document.querySelectorAll('button,input[type=submit],input[type=button],a')]
+        .find(b => visivel(b) && /autenticar|entrar/i.test(b.innerText || b.value || ''));
+      if (botao) botao.click(); else sen.form?.requestSubmit?.() || sen.form?.submit();
+      await dorme(5000);
+      if (![...document.querySelectorAll('input[type=password]')].some(visivel)) return;   // entrou
+      if (recusou()) break;                                      // senha errada de verdade: não insiste
+    }
+    if (recusou()) {
+      faixa('a Sefaz não aceitou o CPF e a senha. Confira em "Acesso à Sefaz" no painel.');
+      await set({ pedido: null });
+      return avisar('A Sefaz recusou o login cadastrado no painel (Acesso à Sefaz).');
+    }
+    faixa('não consegui entrar depois de 4 tentativas. Recarregue a página (F5) que eu tento de novo.');
     return;
   }
 
