@@ -93,7 +93,23 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
             };
           }
           document.querySelectorAll('a[target], form[target]').forEach(x => { if (x.target !== '_self') x.target = '_self'; });
-          e.click();
+          // Card inteiro (sobe até um bloco de tamanho de card)
+          let card = e;
+          while (card.parentElement && card.getBoundingClientRect().height < 80 && card.parentElement !== document.body) card = card.parentElement;
+          // 1) Link de verdade dentro do card ou acima dele: vai direto
+          const link = [card, ...card.querySelectorAll('a[href]')].map(x => x.closest?.('a[href]') || (x.matches?.('a[href]') ? x : null)).find(Boolean);
+          const href = link?.getAttribute('href') || '';
+          if (href && !/^(#|javascript:)/i.test(href)) { location.href = new URL(href, location.href).href; return; }
+          // 2) Clique completo de mouse no centro do card (o card pode reagir a mousedown/mouseup)
+          card.scrollIntoView({ block: 'center' });
+          const r = card.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + Math.min(r.height / 2, 40);
+          const alvo = document.elementFromPoint(x, y) || e;
+          const op = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 };
+          for (const tipo of ['pointerover', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+            const Ev = tipo.startsWith('pointer') ? PointerEvent : MouseEvent;
+            alvo.dispatchEvent(new Ev(tipo, { ...op, buttons: /down/.test(tipo) ? 1 : 0 }));
+          }
+          if (href && /^javascript:/i.test(href)) link.click();   // reserva: link javascript: do próprio site
         } });
       return true;
     }
