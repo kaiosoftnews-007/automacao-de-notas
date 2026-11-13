@@ -40,7 +40,7 @@ chrome.runtime.onMessage.addListener((m, _s, responder) => {
     if (m.tipo === 'executar') {
       const [esc] = await api({ caminho: `escritorios?select=id,nome&id=eq.${m.escritorio_id}` });
       if (!esc) throw new Error('Escritório não encontrado para este login.');
-      await set({ escritorio: esc, pedido: { escritorio_id: esc.id, execucao_id: m.execucao_id, em: Date.now() } });
+      await set({ escritorio: esc, pedido: { escritorio_id: esc.id, execucao_id: m.execucao_id, ie: m.ie || null, em: Date.now() } });
       await chrome.tabs.create({ url: 'https://nfeweb.sefaz.go.gov.br/nfeweb/sites/nfe/consulta-notas-recebidas' });
       return true;
     }

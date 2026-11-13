@@ -286,7 +286,7 @@
     const { pedido } = await chrome.storage.local.get('pedido');
     if (pedido && Date.now() - pedido.em < 60 * 60e3 && $('#cmpNumIeDest') && !(await ler())?.rodando) {
       await chrome.storage.local.set({ pedido: null });   // pedido do botão "Baixar agora" do painel
-      montar(); $('#an-ie', caixa).value = ''; return iniciar(pedido.execucao_id);
+      montar(); $('#an-ie', caixa).value = pedido.ie || ''; return iniciar(pedido.execucao_id);
     }
     if ($('#cmpNumIeDest') || $('#btnHistoricoDownload') || (await ler())?.rodando) passo();
   }, 1500);

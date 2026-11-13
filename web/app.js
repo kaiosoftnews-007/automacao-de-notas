@@ -238,11 +238,11 @@ function statusDownload(b, emp) {
 }
 const qtd = (b, emp, tipo) => { const d = b.dlMap[emp.id + tipo]; return d && d.status !== 'erro' ? (d.qtd_notas ?? 0) : null; };
 
-async function pedirExecucao(escritorioId) {
+async function pedirExecucao(escritorioId, ie = null) {
   const exe = await q(sb.from('execucoes').insert({ escritorio_id: escritorioId, origem: 'manual', status: 'pendente' }).select('id').single());
   if (document.documentElement.dataset.automacaoNotas) {
     // Extensão do Chrome instalada: ela abre a Sefaz e baixa as notas desse escritório.
-    window.postMessage({ tipo: 'automacao-notas:executar', escritorio_id: escritorioId, execucao_id: exe.id }, location.origin);
+    window.postMessage({ tipo: 'automacao-notas:executar', escritorio_id: escritorioId, execucao_id: exe.id, ie }, location.origin);
     toast('Abrindo a Sefaz numa aba nova. Se pedir login, entre e abra "Baixar XML NFE" — o download começa sozinho.');
   } else {
     toast('Pedido enviado. Instale a extensão "Automação de Notas" no Chrome (ou ligue o robô) para baixar.');
@@ -416,7 +416,7 @@ async function telaEscritorio(id, aba = 'empresas') {
   if (aba === 'empresas') {
     corpo = `<div class="card tbl-wrap">${b.empresas.length ? `<table class="tbl"><thead><tr><th>Cód.</th><th>Empresa</th><th>IE</th><th>CNPJ</th><th>Regime</th><th class="c">Entrada</th><th class="c">Saída</th><th>Download</th><th></th></tr></thead><tbody>
       ${b.empresas.map(e => { const [c, l] = statusDownload(b, e); return `<tr class="click" data-href="#/empresa/${e.id}"><td>${h(e.codigo || '')}</td><td style="font-weight:600">${h(e.razao_social)}</td><td>${h(e.ie || '—')}</td><td>${h(e.cnpj || '—')}</td><td>${REGIMES[e.regime] || '—'}</td>
-        <td class="c">${qtd(b, e, 'entrada') ?? '—'}</td><td class="c">${qtd(b, e, 'saida') ?? '—'}</td><td><span class="pill ${c}">${l}</span></td><td style="text-align:right"><a class="btn s" href="#/empresa/${e.id}" style="display:inline-flex;align-items:center;text-decoration:none">Editar</a></td></tr>`; }).join('')}
+        <td class="c">${qtd(b, e, 'entrada') ?? '—'}</td><td class="c">${qtd(b, e, 'saida') ?? '—'}</td><td><span class="pill ${c}">${l}</span></td><td style="text-align:right;white-space:nowrap">${e.ie ? `<button type="button" class="btn s" data-baixar-ie="${h(e.ie)}" title="Baixar só esta empresa">Baixar</button> ` : ''}<a class="btn s" href="#/empresa/${e.id}" style="display:inline-flex;align-items:center;text-decoration:none">Editar</a></td></tr>`; }).join('')}
       </tbody></table>` : `<div class="empty">Nenhuma empresa ainda. <a href="#/empresa/novo?esc=${id}">Cadastre</a> ou importe sua planilha.</div>`}</div>`;
   } else if (aba === 'downloads') {
     const dls = await q(sb.from('downloads').select('*, empresas(razao_social)').eq('escritorio_id', id).order('atualizado_em', { ascending: false }).limit(100));
@@ -467,6 +467,7 @@ async function telaEscritorio(id, aba = 'empresas') {
   $$('[data-aba]').forEach(t => t.onclick = () => telaEscritorio(id, t.dataset.aba));
   $$('tr.click').forEach(tr => tr.onclick = () => go(tr.dataset.href));
   $('#baixar').onclick = () => pedirExecucao(id);
+  $$('[data-baixar-ie]').forEach(bt => bt.onclick = ev => { ev.stopPropagation(); pedirExecucao(id, bt.dataset.baixarIe); });
   if ($('#editarEsc')) $('#editarEsc').onclick = async () => {
     if (await editarEscritorio(es)) telaEscritorio(id, aba);
   };
