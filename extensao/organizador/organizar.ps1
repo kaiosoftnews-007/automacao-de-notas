@@ -25,8 +25,11 @@ function Normal($t) {
 function Limpo($t) { return (($t -replace '[\\/:*?"<>|]+', ' ') -replace '\s+', ' ').Trim() }
 
 function PastaDaEmpresa($g) {
-  if ($g.pasta) { return $g.pasta }
-  $mae = $g.mae
+  $mae = if ($g.pasta) { $g.pasta } else { $g.mae }
+  # Se a pasta informada já é a da empresa (tem o código ou o nome dela), usa ela mesma
+  $folha = Normal (Split-Path -Leaf $mae)
+  if ($g.codigo -and $folha -match ("^0*" + [regex]::Escape(($g.codigo.Trim() -replace '^0+', '')) + "(\D|$)")) { return $mae }
+  if ($g.nome -and $folha -eq (Normal $g.nome)) { return $mae }
   New-Item -ItemType Directory -Force -Path $mae | Out-Null
   $pastas = Get-ChildItem -LiteralPath $mae -Directory -ErrorAction SilentlyContinue
   if ($g.codigo) {

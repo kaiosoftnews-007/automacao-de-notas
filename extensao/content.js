@@ -8,7 +8,7 @@
   window.__automacaoNotas = true;
 
   const CONSULTA = 'https://nfeweb.sefaz.go.gov.br/nfeweb/sites/nfe/consulta-notas-recebidas';
-  const ESPERA_VERIFICACAO = 10 * 60e3, ESPERA_RESULTADO = 40e3, PAUSA = 1500, MAX_HIST = 30;
+  const ESPERA_VERIFICACAO = 10 * 60e3, ESPERA_RESULTADO = 40e3, PAUSA = 1500, MAX_HIST = 90;
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const dorme = ms => new Promise(r => setTimeout(r, ms));
@@ -114,8 +114,8 @@
       for (const e of emps) for (const tipo of ['entrada', 'saida']) {
         if (!e[`baixar_${tipo}`] || !so(e.ie)) continue;
         fila.push({ empresa_id: e.id, ie: so(e.ie), nome: e.razao_social,
-          pastaEmpresa: (e.pasta || '').replace(/[\\/]+$/, ''), codigo: e.codigo || '',
-          mae: (rot?.pasta_destino || 'C:\\Notas').replace(/[\\/]+$/, ''),
+          codigo: e.codigo || '',
+          mae: (e.pasta || rot?.pasta_destino || 'C:\\Notas').replace(/[\\/]+$/, ''),   // pasta mãe: do cadastro da empresa ou da Rotina
           tipo, modelo: e.modelo, canceladas: e.exibir_canceladas, eventos: e.incluir_eventos, etapa: 'pendente' });
       }
       if (!fila.length) return dizer(ie ? `Não achei empresa ativa com a IE ${ie} nesse escritório.` : 'Nenhuma empresa ativa com inscrição estadual nesse escritório.');
@@ -248,12 +248,10 @@
       const mmaaaa = st.comp.slice(5, 7) + st.comp.slice(0, 4);   // ex.: 102026
       const tipoNome = item.tipo === 'entrada' ? 'Entrada' : 'Saida';
       const nomeArq = `${mmaaaa}\\${tipoNome}_${mmaaaa}.zip`;
-      const final = item.pastaEmpresa ? `${item.pastaEmpresa}\\${nomeArq}`
-        : `${item.mae}\\${limpo(item.codigo ? `${item.codigo} - ${item.nome}` : item.nome)}\\${nomeArq}`;
+      const final = `${item.mae}\\${limpo(item.codigo ? `${item.codigo} - ${item.nome}` : item.nome)}\\${nomeArq}`;
       // O Chrome só salva em Downloads: o destino vai escrito no próprio nome do ZIP, e o organizador do
       // Windows move para a pasta da empresa (sem pasta no cadastro, acha ou cria a pasta dentro da pasta mãe).
-      const guia = JSON.stringify(item.pastaEmpresa ? { p: item.pastaEmpresa, a: nomeArq }
-        : { m: item.mae, c: item.codigo, n: item.nome, a: nomeArq });
+      const guia = JSON.stringify({ m: item.mae, c: item.codigo, n: item.nome, a: nomeArq });
       const b64 = btoa(unescape(encodeURIComponent(guia))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       await bg({ tipo: 'nomeDownload', nome: `Notas Sefaz/_organizar/${item.ie}_${item.tipo}_${mmaaaa}__${b64}.zip` });
       item.etapa = 'baixado'; await gravar(st);
@@ -261,13 +259,18 @@
       dizer(`Baixando ${item.nome} · ${item.tipo}...`);
       await clicar(link); await dorme(5000);
     }
-    if (!pend().length) return concluir();
+    const proxima = async () => {                     // empresa terminada: segue para a próxima ou encerra
+      st.tentHist = 0;
+      if (!st.fila.some(i => i.etapa === 'pendente')) return concluir();
+      st.fase = 'consultas'; return irForm();
+    };
+    if (!pend().length) return proxima();
     if (++st.tentHist > MAX_HIST) {
       for (const i of pend()) { i.etapa = 'erro'; i.msg = linhas.length ? 'O arquivo não ficou pronto na fila da Sefaz.' : 'Não consegui ler o Histórico de Downloads.'; await banco(i, { status: 'erro', mensagem: i.msg }); }
-      return concluir();
+      return proxima();
     }
-    dizer(`${pend().length} arquivo(s) ainda na fila da Sefaz. Olho de novo em 1 minuto (${st.tentHist}/${MAX_HIST}).`);
-    return irForm(60e3);
+    dizer(`${pend().map(i => `${i.nome} · ${i.tipo}`).join(', ')}: aguardando a Sefaz gerar o arquivo. Olho de novo em 20 s (${st.tentHist}/${MAX_HIST}).`);
+    return irForm(20e3);
   }
 
   async function concluir() {
@@ -292,10 +295,13 @@
       if (item && item.clicou) return await lerResultado(item);
       if (item) item.etapa = 'pendente';
       item = f.find(i => i.etapa === 'pendente');
-      if (!item) {
-        if (!f.some(i => i.etapa === 'pedido')) return await concluir();
-        st.fase = 'historico'; st.histAberto = false; return await irForm();
+      // Terminou as consultas de uma empresa (entrada e saída)? Antes de passar para a próxima,
+      // espera no Histórico, baixa e organiza os arquivos dela.
+      const aguardando = f.find(i => i.etapa === 'pedido');
+      if (aguardando && (!item || item.empresa_id !== aguardando.empresa_id)) {
+        st.fase = 'historico'; st.histAberto = false; st.tentHist = 0; return await irForm();
       }
+      if (!item) return await concluir();
       if (!$('#cmpNumIeDest')) {
         if (++st.voltas > 3) { st.rodando = false; await gravar(st); return dizer('Não encontrei a tela de consulta. Abra "Baixar XML NFE" e clique em Continuar.'); }
         if (st.voltas === 2) st.urlForm = CONSULTA;
