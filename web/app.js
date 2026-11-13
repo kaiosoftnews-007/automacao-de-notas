@@ -238,6 +238,10 @@ function statusDownload(b, emp) {
 }
 const qtd = (b, emp, tipo) => { const d = b.dlMap[emp.id + tipo]; return d && d.status !== 'erro' ? (d.qtd_notas ?? 0) : null; };
 
+window.addEventListener('message', e => {
+  if (e.source === window && e.data?.tipo === 'automacao-notas:erro') toast('Extensão: ' + e.data.msg);
+});
+
 async function pedirExecucao(escritorioId, ie = null) {
   const exe = await q(sb.from('execucoes').insert({ escritorio_id: escritorioId, origem: 'manual', status: 'pendente' }).select('id').single());
   if (document.documentElement.dataset.automacaoNotas) {
