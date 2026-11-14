@@ -12,7 +12,7 @@ flowchart LR
   E -->|login do painel, empresas, senha da Sefaz,<br>registra downloads| DB
   E -->|entra, consulta, pede e baixa os ZIPs| SF[Portal Sefaz-GO]
   E -->|ZIP com destino no nome| D[Downloads\Notas Sefaz\_organizar]
-  O[Organizador do Windows<br>extensao/organizador/] -->|move para<br>Pasta mãe\Empresa\MMAAAA| P[Pastas das empresas]
+  O[Organizador do Windows<br>organizador/] -->|move para<br>Pasta mãe\Empresa\MMAAAA| P[Pastas das empresas]
   D --> O
   GH[GitHub<br>kaiosoftnews-007/automacao-de-notas] -->|cada push na main publica| CF[Cloudflare<br>automacao-de-notas.denise-vaz1541.workers.dev]
   CF --> S
@@ -42,8 +42,8 @@ automacao-de-notas/
 │  ├─ background.js         → central: fala com o Supabase, abre a aba da Sefaz, nomeia downloads, avisos
 │  ├─ login.js              → leva a aba até a consulta: login, card Acesso Restrito, menu Baixar XML NFE
 │  ├─ content.js            → na tela de consulta: preenche, pesquisa, pede, espera o histórico e baixa
-│  ├─ popup.html / popup.js → janelinha do ícone (login manual, escolher escritório)
-│  └─ organizador/          → script do Windows que move os ZIPs para as pastas das empresas
+│  └─ popup.html / popup.js → janelinha do ícone (login manual, escolher escritório)
+├─ organizador/             → script do Windows que move os ZIPs para as pastas das empresas (baixado à parte em Atualizações)
 ├─ supabase/migrations/     → SQL do banco, em ordem (0001 … 0006)
 ├─ robo/                    → robô antigo em Python (Playwright). Hoje NÃO é usado: a extensão substituiu.
 ├─ wrangler.jsonc           → configuração do Cloudflare (publica a pasta web/)
@@ -89,7 +89,7 @@ automacao-de-notas/
 | Registra no painel | `content.js` → `banco`, `execucao` |
 | Tempos (espera, pausas, tentativas) | `content.js`, linha `const ESPERA_VERIFICACAO … MAX_HIST` |
 
-### Organizador — `extensao/organizador/organizar.ps1`
+### Organizador — `organizador/organizar.ps1`
 | O que | Função |
 |---|---|
 | Lê o destino do nome do ZIP | `GuiaDoNome` |

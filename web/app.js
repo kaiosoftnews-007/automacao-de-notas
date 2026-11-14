@@ -797,7 +797,8 @@ async function montarZip(v) {
   if (!login?.senha) throw new Error('configure primeiro o login que vai dentro da extensão');
   const arv = await fetch(`https://api.github.com/repos/${REPO}/git/trees/${encodeURIComponent(v.ref)}?recursive=1`)
     .then(r => r.ok ? r.json() : Promise.reject(new Error('GitHub não respondeu (' + r.status + ')')));
-  const arquivos = (arv.tree || []).filter(t => t.type === 'blob' && t.path.startsWith('extensao/') && !/credenciais\.json$/.test(t.path));
+  // Só a extensão do Chrome: o organizador (scripts do Windows) é baixado à parte, senão o Windows Defender estranha o zip.
+  const arquivos = (arv.tree || []).filter(t => t.type === 'blob' && t.path.startsWith('extensao/') && !t.path.startsWith('extensao/organizador/') && !/credenciais\.json$/.test(t.path));
   if (!arquivos.length) throw new Error(`versão ${v.versao} não encontrada no GitHub`);
   const { default: JSZip } = await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm');
   const zip = new JSZip(), pasta = `extensao-automacao-notas-v${v.versao}/`;
@@ -809,6 +810,23 @@ async function montarZip(v) {
   zip.file(pasta + 'credenciais.json', JSON.stringify({ email: login.email, senha: login.senha }, null, 2));
   const blob = await zip.generateAsync({ type: 'blob' });
   const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `extensao-automacao-notas-v${v.versao}.zip`;
+  document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+}
+// Organizador de pastas (Windows): pasta organizador/ do GitHub, na versão mais nova.
+async function baixarOrganizador() {
+  const arv = await fetch(`https://api.github.com/repos/${REPO}/git/trees/main?recursive=1`)
+    .then(r => r.ok ? r.json() : Promise.reject(new Error('GitHub não respondeu (' + r.status + ')')));
+  const arquivos = (arv.tree || []).filter(t => t.type === 'blob' && t.path.startsWith('organizador/'));
+  if (!arquivos.length) throw new Error('organizador não encontrado no GitHub');
+  const { default: JSZip } = await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm');
+  const zip = new JSZip();
+  await Promise.all(arquivos.map(async a => {
+    const r = await fetch(`https://raw.githubusercontent.com/${REPO}/main/${a.path}`);
+    if (!r.ok) throw new Error('falhou ao baixar ' + a.path);
+    zip.file('organizador-automacao-notas/' + a.path.slice('organizador/'.length), await r.arrayBuffer());
+  }));
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'organizador-automacao-notas.zip';
   document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
 }
 function pedirLoginExtensao(atual) {
@@ -857,7 +875,7 @@ async function telaAtualizacoes() {
       <div style="width:52px;height:52px;border-radius:10px;background:var(--navy);display:flex;align-items:center;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg></div>
       <div style="flex:1;min-width:260px"><div class="sub">Versão para instalar</div>
         <div style="font-size:28px;font-weight:700;margin-top:2px">${h(princ.versao)} <span class="pill ok" style="vertical-align:middle;margin-left:6px">Principal</span></div>
-        <div class="sub" style="margin-top:4px">Publicada em ${dataBr(princ.publicada_em)} · ${h(princ.descricao || '')}. Já vem com o login do painel.</div></div>
+        <div class="sub" style="margin-top:4px">Publicada em ${dataBr(princ.publicada_em)} · ${h(princ.descricao || '')}. Só os arquivos da extensão do Chrome, já com o login do painel.</div></div>
       <button type="button" class="btn p" style="padding:0 22px" data-baixar="${h(princ.versao)}">Baixar extensão (.zip)</button>
     </section>` : '<div class="card empty">Nenhuma versão cadastrada.</div>'}
     <div class="sub" style="margin-top:-8px">Login dentro da extensão: ${login ? `<b>${h(login.email)}</b>` : '<b style="color:var(--err)">não configurado</b>'} · <a href="#" id="trocar-login">${login ? 'Alterar' : 'Configurar'}</a></div>
@@ -879,6 +897,11 @@ async function telaAtualizacoes() {
           <li><b>Atualizar:</b> substitua os arquivos da pasta e clique em <b>recarregar</b> (↻) na extensão.</li>
           <li>No ícone da extensão, dê um nome ao computador (ex.: PC-CASA).</li></ol></section>
     </div>
+    <section class="card pad" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+      <div style="width:52px;height:52px;border-radius:10px;background:#E8EDF4;display:flex;align-items:center;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1F3864" stroke-width="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+      <div style="flex:1;min-width:260px"><h2>Organizador de pastas</h2><div class="sub" style="margin-top:4px">Move os ZIPs da pasta Downloads para a pasta de cada empresa. Instale <b>uma vez</b> em cada computador que baixa notas: extraia e rode <b>INSTALAR-ORGANIZADOR.bat</b>. Não precisa baixar de novo quando a extensão atualizar.</div></div>
+      <button type="button" class="btn o" style="padding:0 18px" id="baixar-org">Baixar organizador (.zip)</button>
+    </section>
     <section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Histórico de versões</h2><div class="sub" style="margin-top:4px">A versão principal não pode ser excluída; torne outra principal antes.</div></div>
       <table class="tbl"><thead><tr><th>Versão</th><th>Data</th><th>O que mudou</th><th></th></tr></thead><tbody>
       ${vers.map(v => `<tr><td style="font-weight:600">${h(v.versao)}${v.principal ? ' <span class="pill ok">Principal</span>' : ''}</td><td>${dataBr(v.publicada_em)}</td><td>${h(v.descricao || '')}</td>
@@ -894,6 +917,12 @@ async function telaAtualizacoes() {
     catch (er) { toast('Não foi possível baixar: ' + er.message); }
     finally { bt.disabled = false; bt.textContent = txt; }
   });
+  $('#baixar-org').onclick = async e => {
+    const bt = e.currentTarget, txt = bt.textContent; bt.disabled = true; bt.textContent = 'Montando…';
+    try { await baixarOrganizador(); toast('Organizador baixado. Extraia e rode INSTALAR-ORGANIZADOR.bat.'); }
+    catch (er) { toast('Não foi possível baixar: ' + er.message); }
+    finally { bt.disabled = false; bt.textContent = txt; }
+  };
   $$('[data-principal]').forEach(bt => bt.onclick = async () => {
     await q(sb.rpc('extensao_tornar_principal', { p_versao: bt.dataset.principal }));
     toast(`${bt.dataset.principal} agora é a versão principal.`); carregarMenu(true); telaAtualizacoes();
