@@ -63,7 +63,7 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
     if (m.tipo === 'nomeDownload') return set({ proximoNome: { nome: m.nome, ate: Date.now() + 120000 } });
     if (m.tipo === 'executar') return executar(m);
     if (m.tipo === 'salvarPc') return salvarPc(m.nome);
-    if (m.tipo === 'lerPc') return (await get('pc')).pc || null;
+    if (m.tipo === 'lerPc') { const { pc, pcExcluido } = await get(['pc', 'pcExcluido']); return pc || (pcExcluido ? { excluido: pcExcluido } : null); }
     if (m.tipo === 'focar') {   // login da Sefaz pediu verificação: avisa sem tirar você da aba em que está
       marcarVerificacao(true);
       await alertar(remetente.tab, 'Sefaz: falta a verificação no login', 'CPF e senha já estão preenchidos. Faça a verificação e clique em Autenticar.');
@@ -226,8 +226,24 @@ async function executar(m) {
 async function cadastrarPc(nome) {
   const [pc] = await api({ metodo: 'POST', caminho: 'computadores?select=id,nome', prefer: 'return=representation',
     corpo: { nome, versao: chrome.runtime.getManifest().version, ultimo_sinal: new Date().toISOString() } });
-  await set({ pc: { id: pc.id, nome: pc.nome } });
+  await set({ pc: { id: pc.id, nome: pc.nome }, pcExcluido: null });
+  await ligarRemocao();
   return pc;
+}
+
+// Ao remover a extensão do Chrome, o Chrome abre esta página do painel, que tira o computador da lista.
+async function ligarRemocao() {
+  try {
+    const { pc } = await get('pc');
+    if (!pc?.id) { chrome.runtime.setUninstallURL(''); return; }
+    let chave = pc.chave;
+    if (!chave) {
+      const [c] = await api({ caminho: `computadores_chave?select=chave&pc_id=eq.${pc.id}` }) || [];
+      if (!c) return;
+      chave = c.chave; await set({ pc: { ...pc, chave } });
+    }
+    chrome.runtime.setUninstallURL(`https://automacao-de-notas.denise-vaz1541.workers.dev/#/removida?pc=${pc.id}&k=${chave}`);
+  } catch (e) { console.warn('ligarRemocao:', e.message); }
 }
 async function salvarPc(nome) {
   nome = String(nome || '').trim().toUpperCase().slice(0, 40);
@@ -236,7 +252,7 @@ async function salvarPc(nome) {
   const { pc } = await get('pc');
   if (pc?.id) {
     const r = await api({ metodo: 'PATCH', caminho: `computadores?id=eq.${pc.id}&select=id`, prefer: 'return=representation', corpo: { nome } });
-    if (r?.length) { await set({ pc: { id: pc.id, nome } }); sinal(); return { id: pc.id, nome }; }
+    if (r?.length) { await set({ pc: { ...pc, nome } }); sinal(); return { id: pc.id, nome }; }
   }
   const novo = await cadastrarPc(nome); sinal(); return novo;
 }
@@ -264,7 +280,10 @@ async function sinal() {
     const { pc } = await get('pc'); if (!pc?.id) return;   // sem nome: este computador não entra na lista
     const r = await api({ metodo: 'PATCH', caminho: `computadores?id=eq.${pc.id}&select=id`, prefer: 'return=representation',
       corpo: { ultimo_sinal: new Date().toISOString(), versao: chrome.runtime.getManifest().version } });
-    if (!r?.length) { await cadastrarPc(pc.nome); return; }   // foi removido no painel: volta para a lista
+    if (!r?.length) {   // foi excluído no painel: sai da lista até alguém salvar um nome de novo no ícone da extensão
+      await set({ pc: null, pcExcluido: pc.nome }); chrome.runtime.setUninstallURL(''); return;
+    }
+    if (!pc.chave) ligarRemocao();
     if (await ocupado()) return;
     const [p] = await api({ metodo: 'POST', caminho: 'rpc/extensao_pegar_pedido', corpo: { p_pc: pc.id } }) || [];
     if (!p) return;
@@ -277,5 +296,6 @@ async function sinal() {
 
 chrome.alarms.create('sinal', { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener(a => { if (a.name === 'sinal') sinal(); });
-chrome.runtime.onStartup.addListener(() => sinal());
+chrome.runtime.onStartup.addListener(() => { sinal(); ligarRemocao(); });
+fixoPronto.then(ligarRemocao);
 sinal();

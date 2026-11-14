@@ -34,7 +34,8 @@ $('entrar').onclick = async () => {
 $('sair').onclick = async () => { await bg({ tipo: 'sair' }); mostrar(); };
 (async () => {
   const pc = await bg({ tipo: 'lerPc' }).catch(() => null);
-  if (pc) { $('pcnome').value = pc.nome; $('pcinfo').textContent = `Na lista do painel como ${pc.nome}. Deixe o Chrome aberto para ele receber os pedidos.`; }
+  if (pc?.excluido) { $('pcnome').value = pc.excluido; $('pcinfo').textContent = `${pc.excluido} foi excluído no painel. Para voltar à lista, clique em Salvar nome.`; }
+  else if (pc) { $('pcnome').value = pc.nome; $('pcinfo').textContent = `Na lista do painel como ${pc.nome}. Deixe o Chrome aberto para ele receber os pedidos.`; }
 })();
 $('pcsalvar').onclick = async () => {
   $('msg').textContent = '';

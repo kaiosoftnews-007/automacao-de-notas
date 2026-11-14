@@ -124,6 +124,7 @@ function carregarMenu(forcar = false) {
     sb.from('alertas').select('id', { count: 'exact', head: true }).is('resolvido_em', null),
     sb.from('robo_status').select('ultimo_sinal').eq('id', 'principal').maybeSingle(),
     sb.from('computadores').select('*').order('nome'),
+    sb.from('extensao_versoes').select('versao').eq('principal', true).maybeSingle(),
   ]);
   return st.menuP;
 }
@@ -136,13 +137,14 @@ function mostrarCarregando() {
 }
 
 async function layout(ativo, conteudo) {
-  const [{ count }, robo, pcsR] = await carregarMenu();
+  const [{ count }, robo, pcsR, princR] = await carregarMenu();
   const pcs = pcsR?.data || [], pcsOn = pcs.filter(pcOnline);
+  const atrasados = princR?.data ? pcs.filter(p => desatualizado(p, princR.data.versao)).length : 0;
   const parados = pcs.filter(p => p.verificacao_desde && pcOnline(p));
   const online = robo.data?.ultimo_sinal && (Date.now() - new Date(robo.data.ultimo_sinal)) < 5 * 60 * 1000;
   const itens = eAdmin()
     ? [['#/', 'Painel geral', 'painel'], ['#/entregas', 'Visão de entregas', 'entregas'], ['#/escritorios', 'Escritórios', 'escritorios'],
-       ['#/alertas', 'Alertas', 'alertas'], ['#/acesso', 'Acesso à Sefaz', 'acesso']]
+       ['#/alertas', 'Alertas', 'alertas'], ['#/acesso', 'Acesso à Sefaz', 'acesso'], ['#/atualizacoes', 'Atualizações', 'atualizacoes']]
     : [['#/escritorio/' + st.perfil.escritorio_id, 'Meu escritório', 'escritorios'], ['#/entregas', 'Entregas', 'entregas'],
        ['#/alertas', 'Alertas', 'alertas'], ['#/acesso', 'Acesso à Sefaz', 'acesso'], ['#/rotina/' + st.perfil.escritorio_id, 'Rotina automática', 'rotina']];
   root.innerHTML = `
@@ -150,7 +152,7 @@ async function layout(ativo, conteudo) {
     <aside class="side" id="side">
       <div class="brand"><i>${ICON}</i>Automação de Notas</div>
       <nav class="nav">${itens.map(([href, label, k]) =>
-        `<a href="${href}" class="${k === ativo ? 'on' : ''}">${label}${k === 'alertas' && count ? ` <span class="badge">${count}</span>` : ''}</a>`).join('')}</nav>
+        `<a href="${href}" class="${k === ativo ? 'on' : ''}">${label}${k === 'alertas' && count ? ` <span class="badge">${count}</span>` : ''}${k === 'atualizacoes' && atrasados ? ` <span class="badge" style="background:var(--gold)">${atrasados}</span>` : ''}</a>`).join('')}</nav>
       <div class="me">
         <div class="robo"><span class="dot ${online ? 'on' : ''}"></span>Robô ${online ? 'online' : 'offline'}</div>
         <div>${robo.data?.ultimo_sinal ? 'Último sinal: ' + quando(robo.data.ultimo_sinal) : 'Robô ainda não instalado'}</div>
@@ -253,6 +255,29 @@ const pcOnline = p => !!p?.ultimo_sinal && Date.now() - new Date(p.ultimo_sinal)
 const temExtensaoAqui = () => !!document.documentElement.dataset.automacaoNotas;
 const meuPc = () => document.documentElement.dataset.automacaoPc || null;   // extensão 3.8.0+ informa qual é este computador
 async function carregarPcs() { const { data } = await sb.from('computadores').select('*').order('nome'); return data || []; }
+// Compara versões (3.8.1 > 3.8.0 > 3.7.7). Sem versão informada conta como desatualizado.
+const cmpVer = (a, b) => { const x = String(a || '0').split('.').map(Number), y = String(b || '0').split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; } return 0; };
+const desatualizado = (p, principal) => !!principal && cmpVer(p.versao, principal) < 0;
+// Janela de confirmação (Cancelar / ação em vermelho). Devolve true se confirmou.
+function confirmar(titulo, texto, botao) {
+  return new Promise(resolve => {
+    const fundo = document.createElement('div'); fundo.className = 'modal-fundo';
+    fundo.innerHTML = `<div class="card modal" role="dialog" aria-modal="true"><h2>${h(titulo)}</h2><div style="font-size:14px;color:var(--ink2)">${h(texto)}</div>
+      <div style="display:flex;gap:10px;justify-content:flex-end"><button type="button" class="btn" id="mcanc">Cancelar</button><button type="button" class="btn del" id="mok">${h(botao)}</button></div></div>`;
+    document.body.appendChild(fundo);
+    const fechar = ok => { fundo.remove(); resolve(ok); };
+    fundo.querySelector('#mcanc').onclick = () => fechar(false);
+    fundo.querySelector('#mok').onclick = () => fechar(true);
+    fundo.onclick = e => { if (e.target === fundo) fechar(false); };
+    fundo.querySelector('#mok').focus();
+  });
+}
+async function excluirPc(pc) {
+  if (!await confirmar(`Excluir ${pc.nome}?`, 'Ele sai da lista e do "Baixar em". Pedidos que estavam esperando por ele são cancelados.', 'Excluir computador')) return false;
+  await q(sb.from('computadores').delete().eq('id', pc.id));
+  toast(`${pc.nome} excluído.`); carregarMenu(true); return true;
+}
 const lerLocal = k => { try { return localStorage.getItem(k); } catch (_) { return null; } };
 const gravarLocal = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
 // '' = este computador; senão, id do computador escolhido
@@ -742,18 +767,16 @@ async function telaAcesso(params) {
         <div class="sub">A senha fica guardada criptografada. Depois de salva, ninguém consegue ver, só trocar.${c?.alterada_em ? `<br>Última alteração: ${new Date(c.alterada_em).toLocaleDateString('pt-BR')}` : ''}</div>
       </form>` : ''}
     </div>
-    ${pcs.length ? `<section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Computadores com a extensão</h2><div class="sub" style="margin-top:4px">Aparecem em "Baixar em". Remova os que não usa mais; se a extensão for aberta de novo nele, ele volta para a lista.</div></div>
+    ${pcs.length ? `<section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Computadores com a extensão</h2><div class="sub" style="margin-top:4px">Aparecem em "Baixar em". Exclua os que não usa mais. Ao remover a extensão do Chrome (versão 3.8.1 ou mais nova), o computador sai daqui sozinho.</div></div>
       <table class="tbl"><thead><tr><th>Computador</th><th>Situação</th><th>Último sinal</th><th>Versão</th><th></th></tr></thead><tbody>
       ${pcs.map(p => `<tr><td style="font-weight:600">${h(p.nome)}${p.id === meuPc() ? ' <span class="sub">(este)</span>' : ''}</td>
         <td>${p.verificacao_desde && pcOnline(p) ? '<span class="pill er">Parado na verificação</span>' : pcOnline(p) ? '<span class="pill ok">Online</span>' : '<span class="pill na">Offline</span>'}</td>
         <td>${quando(p.ultimo_sinal)}</td><td>${h(p.versao || '—')}</td>
-        <td style="text-align:right">${eAdmin() ? `<button type="button" class="btn s" data-tirar-pc="${p.id}" data-nome="${h(p.nome)}">Remover</button>` : ''}</td></tr>`).join('')}
+        <td style="text-align:right">${eAdmin() ? `<button type="button" class="btn s del-o" data-tirar-pc="${p.id}">Excluir</button>` : ''}</td></tr>`).join('')}
       </tbody></table></section>` : ''}`);
   $$('tr.click').forEach(tr => tr.onclick = () => go(tr.dataset.href));
   $$('[data-tirar-pc]').forEach(bt => bt.onclick = async () => {
-    if (!confirm(`Remover "${bt.dataset.nome}" da lista de computadores?`)) return;
-    await q(sb.from('computadores').delete().eq('id', bt.dataset.tirarPc));
-    toast('Computador removido.'); carregarMenu(true); telaAcesso(params);
+    if (await excluirPc(pcs.find(p => p.id === bt.dataset.tirarPc))) telaAcesso(params);
   });
   if (!$('#f')) return;
   $('#ver').onchange = e => { $('[name=senha]').type = e.target.checked ? 'text' : 'password'; };
@@ -765,6 +788,135 @@ async function telaAcesso(params) {
     if (fd.has('rodar')) await pedirExecucao(selId); else toast('Acesso salvo.');
     telaAcesso(params);
   };
+}
+
+// ---------- atualizações da extensão ----------
+const REPO = 'kaiosoftnews-007/automacao-de-notas';
+async function montarZip(v) {
+  const [login] = await q(sb.rpc('extensao_login_ler')) || [];
+  if (!login?.senha) throw new Error('configure primeiro o login que vai dentro da extensão');
+  const arv = await fetch(`https://api.github.com/repos/${REPO}/git/trees/${encodeURIComponent(v.ref)}?recursive=1`)
+    .then(r => r.ok ? r.json() : Promise.reject(new Error('GitHub não respondeu (' + r.status + ')')));
+  const arquivos = (arv.tree || []).filter(t => t.type === 'blob' && t.path.startsWith('extensao/') && !/credenciais\.json$/.test(t.path));
+  if (!arquivos.length) throw new Error(`versão ${v.versao} não encontrada no GitHub`);
+  const { default: JSZip } = await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm');
+  const zip = new JSZip(), pasta = `extensao-automacao-notas-v${v.versao}/`;
+  await Promise.all(arquivos.map(async a => {
+    const r = await fetch(`https://raw.githubusercontent.com/${REPO}/${encodeURIComponent(v.ref)}/${a.path}`);
+    if (!r.ok) throw new Error('falhou ao baixar ' + a.path);
+    zip.file(pasta + a.path.slice('extensao/'.length), await r.arrayBuffer());
+  }));
+  zip.file(pasta + 'credenciais.json', JSON.stringify({ email: login.email, senha: login.senha }, null, 2));
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `extensao-automacao-notas-v${v.versao}.zip`;
+  document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+}
+function pedirLoginExtensao(atual) {
+  return new Promise(resolve => {
+    const fundo = document.createElement('div'); fundo.className = 'modal-fundo';
+    fundo.innerHTML = `<form class="card modal"><h2>Login que vai dentro da extensão</h2>
+      <div class="sub">Login de administrador do painel. A extensão entra sozinha com ele. A senha fica guardada criptografada.</div>
+      <label class="f">E-mail<input name="email" type="email" required value="${h(atual || st.session.user.email)}"></label>
+      <label class="f">Senha<input name="senha" type="password" required autocomplete="current-password"></label>
+      <div id="merr" style="color:var(--err);font-size:13px;min-height:16px"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end"><button type="button" class="btn" id="mcanc">Cancelar</button><button class="btn p">Salvar</button></div></form>`;
+    document.body.appendChild(fundo);
+    const form = fundo.querySelector('form'); form.senha.focus();
+    const fechar = ok => { fundo.remove(); resolve(ok); };
+    fundo.querySelector('#mcanc').onclick = () => fechar(false);
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const bt = form.querySelector('.p'); bt.disabled = true; bt.textContent = 'Conferindo…';
+      const email = form.email.value.trim(), senha = form.senha.value;
+      // Confere o login sem mexer na sessão aberta do painel.
+      const teste = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false, autoRefreshToken: false, storageKey: 'teste-login-extensao' } });
+      const { data, error } = await teste.auth.signInWithPassword({ email, password: senha });
+      const papel = data?.user ? (await teste.from('perfis').select('papel').eq('user_id', data.user.id).maybeSingle()).data?.papel : null;
+      const erro = error ? 'E-mail ou senha incorretos.' : papel !== 'admin' ? 'Esse login não é administrador do painel.' : '';
+      if (erro) { bt.disabled = false; bt.textContent = 'Salvar'; fundo.querySelector('#merr').textContent = erro; return; }
+      try { await q(sb.rpc('extensao_login_salvar', { p_email: email, p_senha: senha })); }
+      catch (_) { bt.disabled = false; bt.textContent = 'Salvar'; return; }
+      fechar(true);
+    };
+  });
+}
+const dataBr = d => new Date(d + 'T12:00').toLocaleDateString('pt-BR');
+async function telaAtualizacoes() {
+  if (!eAdmin()) return go('#/');
+  const [vers, pcs, logins] = await Promise.all([
+    q(sb.from('extensao_versoes').select('*')),
+    carregarPcs(),
+    q(sb.from('extensao_login').select('email,alterado_em')),
+  ]);
+  vers.sort((a, b) => cmpVer(b.versao, a.versao));
+  const princ = vers.find(v => v.principal) || vers[0], login = logins[0];
+  const atras = pcs.filter(p => desatualizado(p, princ?.versao));
+  await layout('atualizacoes', `
+    <div class="top"><div><div class="sub">Baixe a extensão do Chrome em qualquer computador</div><h1>Atualizações</h1></div></div>
+    ${princ ? `<section class="card pad" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+      <div style="width:52px;height:52px;border-radius:10px;background:var(--navy);display:flex;align-items:center;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg></div>
+      <div style="flex:1;min-width:260px"><div class="sub">Versão para instalar</div>
+        <div style="font-size:28px;font-weight:700;margin-top:2px">${h(princ.versao)} <span class="pill ok" style="vertical-align:middle;margin-left:6px">Principal</span></div>
+        <div class="sub" style="margin-top:4px">Publicada em ${dataBr(princ.publicada_em)} · ${h(princ.descricao || '')}. Já vem com o login do painel.</div></div>
+      <button type="button" class="btn p" style="padding:0 22px" data-baixar="${h(princ.versao)}">Baixar extensão (.zip)</button>
+    </section>` : '<div class="card empty">Nenhuma versão cadastrada.</div>'}
+    <div class="sub" style="margin-top:-8px">Login dentro da extensão: ${login ? `<b>${h(login.email)}</b>` : '<b style="color:var(--err)">não configurado</b>'} · <a href="#" id="trocar-login">${login ? 'Alterar' : 'Configurar'}</a></div>
+    ${atras.length ? `<div class="card" style="background:var(--warn-bg);border-color:#E9C46A;padding:14px 18px;color:var(--warn);font-size:14px"><b>${atras.map(p => `${h(p.nome)} (${h(p.versao || 'sem versão')})`).join(', ')} ${atras.length > 1 ? 'estão desatualizados' : 'está desatualizado'}.</b> Baixe a ${h(princ.versao)} e siga os passos para atualizar.</div>` : ''}
+    <div class="cols">
+      <section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Computadores com a extensão</h2><div class="sub" style="margin-top:4px">Versão que cada computador informou no último sinal. Ao remover a extensão do Chrome (3.8.1 ou mais nova), ele sai daqui sozinho.</div></div>
+        ${pcs.length ? `<table class="tbl"><thead><tr><th>Computador</th><th>Situação</th><th>Último sinal</th><th>Versão</th><th class="c">Atualizada?</th><th></th></tr></thead><tbody>
+        ${pcs.map(p => `<tr><td style="font-weight:600">${h(p.nome)}${p.id === meuPc() ? ' <span class="sub">(este)</span>' : ''}</td>
+          <td>${p.verificacao_desde && pcOnline(p) ? '<span class="pill er">Parado na verificação</span>' : pcOnline(p) ? '<span class="pill ok">Online</span>' : '<span class="pill na">Offline</span>'}</td>
+          <td>${quando(p.ultimo_sinal)}</td><td>${h(p.versao || '—')}</td>
+          <td class="c">${desatualizado(p, princ?.versao) ? '<span class="pill warn">Desatualizado</span>' : '<span class="pill ok">Em dia</span>'}</td>
+          <td style="text-align:right"><button type="button" class="btn s del-o" data-tirar-pc="${p.id}">Excluir</button></td></tr>`).join('')}
+        </tbody></table>` : '<div class="empty">Nenhum computador com nome ainda. Dê um nome no ícone da extensão.</div>'}</section>
+      <section class="card pad"><h2>Como instalar ou atualizar</h2>
+        <ol style="font-size:14px;color:var(--ink2);padding-left:20px;margin:12px 0 0;line-height:1.7">
+          <li>Baixe o zip e extraia numa pasta fixa.<div class="mono" style="margin:6px 0">Documentos\extensao-sefaz</div></li>
+          <li>Abra <b>chrome://extensions</b> e ligue o <b>Modo do desenvolvedor</b>.</li>
+          <li><b>Primeira vez:</b> Carregar sem compactação → escolha a pasta.</li>
+          <li><b>Atualizar:</b> substitua os arquivos da pasta e clique em <b>recarregar</b> (↻) na extensão.</li>
+          <li>No ícone da extensão, dê um nome ao computador (ex.: PC-CASA).</li></ol></section>
+    </div>
+    <section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Histórico de versões</h2><div class="sub" style="margin-top:4px">A versão principal não pode ser excluída; torne outra principal antes.</div></div>
+      <table class="tbl"><thead><tr><th>Versão</th><th>Data</th><th>O que mudou</th><th></th></tr></thead><tbody>
+      ${vers.map(v => `<tr><td style="font-weight:600">${h(v.versao)}${v.principal ? ' <span class="pill ok">Principal</span>' : ''}</td><td>${dataBr(v.publicada_em)}</td><td>${h(v.descricao || '')}</td>
+        <td style="text-align:right;white-space:nowrap"><button type="button" class="btn s o" data-baixar="${h(v.versao)}">Baixar</button>
+        ${v.principal ? '' : ` <button type="button" class="btn s" data-principal="${h(v.versao)}">Tornar principal</button> <button type="button" class="btn s del-o" data-excluir-ver="${h(v.versao)}">Excluir</button>`}</td></tr>`).join('')}
+      </tbody></table></section>`);
+  $('#trocar-login').onclick = async e => { e.preventDefault(); if (await pedirLoginExtensao(login?.email)) { toast('Login da extensão salvo.'); telaAtualizacoes(); } };
+  $$('[data-baixar]').forEach(bt => bt.onclick = async () => {
+    const v = vers.find(x => x.versao === bt.dataset.baixar);
+    if (!login && !await pedirLoginExtensao()) return;
+    const txt = bt.textContent; bt.disabled = true; bt.textContent = 'Montando…';
+    try { await montarZip(v); toast(`Extensão ${v.versao} baixada.`); if (!login) telaAtualizacoes(); }
+    catch (er) { toast('Não foi possível baixar: ' + er.message); }
+    finally { bt.disabled = false; bt.textContent = txt; }
+  });
+  $$('[data-principal]').forEach(bt => bt.onclick = async () => {
+    await q(sb.rpc('extensao_tornar_principal', { p_versao: bt.dataset.principal }));
+    toast(`${bt.dataset.principal} agora é a versão principal.`); carregarMenu(true); telaAtualizacoes();
+  });
+  $$('[data-excluir-ver]').forEach(bt => bt.onclick = async () => {
+    const ver = bt.dataset.excluirVer;
+    if (!await confirmar(`Excluir a versão ${ver}?`, 'Ela sai do histórico e não aparece mais para baixar. Os computadores que já têm ela instalada continuam funcionando.', 'Excluir versão')) return;
+    await q(sb.from('extensao_versoes').delete().eq('versao', ver));
+    toast(`Versão ${ver} excluída.`); telaAtualizacoes();
+  });
+  $$('[data-tirar-pc]').forEach(bt => bt.onclick = async () => {
+    if (await excluirPc(pcs.find(p => p.id === bt.dataset.tirarPc))) telaAtualizacoes();
+  });
+}
+
+// Página que o Chrome abre quando a extensão é removida: tira o computador da lista (não precisa de login).
+async function telaRemovida(params) {
+  root.innerHTML = '<div class="login"><div class="card"><div class="sub">Tirando este computador da lista…</div></div></div>';
+  const { data: nome, error } = await sb.rpc('extensao_removida', { p_pc: params.get('pc'), p_chave: params.get('k') });
+  const card = root.querySelector('.login .card');
+  card.innerHTML = error
+    ? `<h1 style="font-size:20px">Não foi possível tirar este computador da lista</h1><p class="sub">Exclua pelo painel, em Atualizações.</p>`
+    : `<h1 style="font-size:20px">Extensão removida</h1><p class="sub">${nome ? `<b>${h(nome)}</b> saiu da lista de computadores do painel.` : 'Este computador já não estava na lista do painel.'} Pode fechar esta aba.</p>`;
 }
 
 // ---------- rotina ----------
@@ -831,6 +983,8 @@ function naoEncontrado(titulo, texto) {
 
 // ---------- roteador ----------
 async function rota() {
+  const [rp, rq] = (location.hash.slice(1) || '/').split('?');
+  if (rp === '/removida') { if (!st.removidaFeita) { st.removidaFeita = true; await telaRemovida(new URLSearchParams(rq || '')); } return; }
   if (!st.session) return telaLogin();
   if (!st.perfil) {
     st.perfil = await q(sb.from('perfis').select('*').eq('user_id', st.session.user.id).maybeSingle());
@@ -853,6 +1007,7 @@ async function rota() {
     if (p[0] === 'empresa' && p[1]) return await telaEmpresa(p[1], params);
     if (p[0] === 'alertas') return await telaAlertas();
     if (p[0] === 'acesso') return await telaAcesso(params);
+    if (p[0] === 'atualizacoes') return await telaAtualizacoes();
     if (p[0] === 'rotina' && p[1]) return await telaRotina(p[1]);
     go('#/');
   } catch (e) {
