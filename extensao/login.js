@@ -26,7 +26,7 @@
     const mh = location.hash.match(/automacao=([^&]+)/);
     if (mh) {
       const p = JSON.parse(decodeURIComponent(mh[1]));
-      await set({ pedido: { ...p, em: Date.now() }, login: {}, idas: {}, cliques: {} });
+      await set({ pedido: { ...p, em: Date.now() }, login: {}, idas: {}, cliques: {}, cliquesCard: {} });
       history.replaceState(null, '', location.pathname + location.search);
     }
   } catch (_) {}
@@ -198,7 +198,8 @@
       if (!card) await dorme(800);
     }
     if (!card) return irPara(PORTAL, 'abrindo o portal da Sefaz...');
-    if (!(await conta('cliques', 4))) return faixa('não consegui abrir o Acesso Restrito. Clique no card que eu continuo.');
+    // Contador só do card: se você clicar nele na mão, a etapa seguinte (Baixar XML NFE) ainda tem os cliques dela.
+    if (!(await conta('cliquesCard', 4))) return faixa('não consegui abrir o Acesso Restrito. Clique no card que eu continuo.');
     faixa('abrindo o Acesso Restrito...');
     await clicar(card.closest('a') || card, 'card');
   }
