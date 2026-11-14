@@ -77,7 +77,7 @@
       if (certo) {
         await set({ sessaoSefaz: { cpf: cpfTela, escritorio_id: esc, em: Date.now() } });
         if (cpfTela !== certo) {
-          if (!(await conta('trocas', 2))) {
+          if (!(await conta('trocas', 3))) {
             faixa('a Sefaz continua aberta com o login de outro contador. Clique em Sair na Sefaz que eu entro com o contador certo.');
             return avisar('A Sefaz está com o login de outro contador. Clique em Sair na aba da Sefaz que eu entro com o contador certo.');
           }

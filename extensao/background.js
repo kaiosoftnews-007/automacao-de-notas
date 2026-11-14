@@ -73,11 +73,26 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
     // A Sefaz estava aberta com o contador de outro escritório: apaga o login guardado da Sefaz neste Chrome
     // (menos o da verificação da Cloudflare) e volta ao portal para entrar com o contador certo.
     if (m.tipo === 'trocarContador') {
+      const tabId = remetente.tab?.id;
+      await set({ sessaoSefaz: null, login: {}, idas: {}, cliques: {}, cliquesCard: {}, captcha: {} });
+      if (!tabId) return true;
+      // 1) Sai pelo botão "Sair" da própria Sefaz: só assim a sessão do Acesso Restrito é encerrada no servidor
+      //    (apagar cookies não bastava: o Acesso Restrito continuava com o contador antigo).
+      const [r] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'MAIN', func: () => {
+        const el = [...document.querySelectorAll('a,button,span,li')]
+          .filter(e => (e.offsetParent || e.getClientRects().length) && /^\s*Sair\s*$/i.test(e.innerText || ''))
+          .sort((a, b) => (a.tagName === 'A' ? -1 : 0) - (b.tagName === 'A' ? -1 : 0))[0];
+        if (!el) return false;
+        window.confirm = () => true;          // se a Sefaz perguntar "deseja sair?"
+        (el.closest('a') || el).click();
+        return true;
+      } }).catch(() => [{}]);
+      if (r?.result) return true;
+      // 2) Sem botão Sair na tela (portal): apaga os cookies de login da Sefaz (menos os da Cloudflare) e volta ao portal.
       const cs = await chrome.cookies.getAll({ domain: 'sefaz.go.gov.br' });
       await Promise.all(cs.filter(c => !/^(cf_|__cf)/i.test(c.name)).map(c =>
         chrome.cookies.remove({ url: `https://${c.domain.replace(/^\./, '')}${c.path}`, name: c.name, storeId: c.storeId }).catch(() => {})));
-      await set({ sessaoSefaz: null, login: {}, idas: {}, cliques: {}, cliquesCard: {}, captcha: {} });
-      if (remetente.tab?.id) await chrome.tabs.update(remetente.tab.id, { url: 'https://portal.sefaz.go.gov.br/portalsefaz-apps/' });
+      await chrome.tabs.update(tabId, { url: 'https://portal.sefaz.go.gov.br/portalsefaz-apps/' });
       return true;
     }
     if (m.tipo === 'credSefaz') {
