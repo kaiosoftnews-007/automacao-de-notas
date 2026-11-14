@@ -293,6 +293,18 @@
     await gravar(st); bg({ tipo: 'avisar', texto: st.msg }).catch(() => {});
   }
 
+  // Nunca consulta com o login de outro contador (o login.js anota qual CPF está logado na Sefaz).
+  async function contadorCerto() {
+    const { sessaoSefaz } = await chrome.storage.local.get('sessaoSefaz');
+    if (!sessaoSefaz?.cpf) return true;
+    let certo = null;
+    try { certo = (await bg({ tipo: 'credSefaz', escritorio_id: st.escritorio.id }))?.cpf; } catch (_) {}
+    if (!certo || sessaoSefaz.cpf === certo) return true;
+    dizer('A Sefaz está com o login de outro contador. Saindo para entrar com o contador deste escritório...');
+    await gravar(st); bg({ tipo: 'trocarContador' }).catch(() => {});
+    return false;
+  }
+
   // ---------------------------------------------------------------- motor
   async function passo() {
     if (ocupado) return; ocupado = true;
@@ -321,6 +333,7 @@
         return await irForm();
       }
       st.voltas = 0;
+      if (!(await contadorCerto())) return;
       try { await preencherEPesquisar(item); } catch (e) { await falhar(item, e.message); }
     } catch (e) { dizer('Erro: ' + e.message); }
     finally { ocupado = false; if (st) gravar(st); }

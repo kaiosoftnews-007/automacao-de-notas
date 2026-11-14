@@ -67,6 +67,26 @@
   await dorme(800);
   const esc = await ativo();
   if (!esc) return;
+
+  // 0) Confere se a Sefaz está aberta com o contador DESTE escritório. O Chrome guarda o último login da Sefaz,
+  //    e sem esta conferência a extensão baixava as notas de um escritório com o acesso do contador de outro.
+  if (topo && !document.querySelector('input[type=password]')) {
+    const cpfTela = (texto().match(/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/) || [])[0]?.replace(/\D/g, '');
+    if (cpfTela) {
+      const certo = (await msg({ tipo: 'credSefaz', escritorio_id: esc }))?.ok?.cpf;
+      if (certo) {
+        await set({ sessaoSefaz: { cpf: cpfTela, escritorio_id: esc, em: Date.now() } });
+        if (cpfTela !== certo) {
+          if (!(await conta('trocas', 2))) {
+            faixa('a Sefaz continua aberta com o login de outro contador. Clique em Sair na Sefaz que eu entro com o contador certo.');
+            return avisar('A Sefaz está com o login de outro contador. Clique em Sair na aba da Sefaz que eu entro com o contador certo.');
+          }
+          faixa('a Sefaz está aberta com o login de outro contador; saindo para entrar com o contador deste escritório...');
+          return msg({ tipo: 'trocarContador' });
+        }
+      }
+    }
+  }
   if (document.querySelector('#cmpNumIeDest') || document.querySelector('#btnHistoricoDownload')) return; // tela certa: o content.js cuida
 
   // 1) Tela pedindo senha (login do portal ou "requer nova autenticação")

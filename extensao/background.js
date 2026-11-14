@@ -70,6 +70,16 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
       return true;
     }
     if (m.tipo === 'irPara') { if (remetente.tab?.id) await chrome.tabs.update(remetente.tab.id, { url: m.url }); return true; }
+    // A Sefaz estava aberta com o contador de outro escritório: apaga o login guardado da Sefaz neste Chrome
+    // (menos o da verificação da Cloudflare) e volta ao portal para entrar com o contador certo.
+    if (m.tipo === 'trocarContador') {
+      const cs = await chrome.cookies.getAll({ domain: 'sefaz.go.gov.br' });
+      await Promise.all(cs.filter(c => !/^(cf_|__cf)/i.test(c.name)).map(c =>
+        chrome.cookies.remove({ url: `https://${c.domain.replace(/^\./, '')}${c.path}`, name: c.name, storeId: c.storeId }).catch(() => {})));
+      await set({ sessaoSefaz: null, login: {}, idas: {}, cliques: {}, cliquesCard: {}, captcha: {} });
+      if (remetente.tab?.id) await chrome.tabs.update(remetente.tab.id, { url: 'https://portal.sefaz.go.gov.br/portalsefaz-apps/' });
+      return true;
+    }
     if (m.tipo === 'credSefaz') {
       const r = await api({ metodo: 'POST', caminho: 'rpc/extensao_obter_credencial', corpo: { p_escritorio: m.escritorio_id } });
       return r?.[0] ? { cpf: String(r[0].cpf).replace(/\D/g, ''), senha: r[0].senha } : null;
