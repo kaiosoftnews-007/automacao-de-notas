@@ -8,7 +8,7 @@
   window.__automacaoNotas = true;
 
   const CONSULTA = 'https://nfeweb.sefaz.go.gov.br/nfeweb/sites/nfe/consulta-notas-recebidas';
-  const ESPERA_VERIFICACAO = 10 * 60e3, ESPERA_RESULTADO = 40e3, PAUSA = 1500, MAX_HIST = 90;
+  const ESPERA_VERIFICACAO = 10 * 60e3, ESPERA_RESULTADO = 3 * 60e3, PAUSA = 1500, MAX_HIST = 90;
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const dorme = ms => new Promise(r => setTimeout(r, ms));
@@ -64,7 +64,7 @@
     $('#an-pausar', caixa).onclick = async () => { if (!st) return; st.rodando = !st.rodando; await gravar(st); st.rodando ? (location.href = st.urlForm) : dizer('Pausado.'); };
     $('#an-erros', caixa).onclick = async () => {
       if (!st) return;
-      st.fila.forEach(i => { if (i.etapa === 'erro') { i.etapa = 'pendente'; i.msg = ''; i.clicou = false; } });
+      st.fila.forEach(i => { if (i.etapa === 'erro') { i.etapa = 'pendente'; i.msg = ''; i.clicou = false; i.tent = 0; } });
       Object.assign(st, { fase: 'consultas', rodando: true, voltas: 0 }); await gravar(st); irForm();
     };
     $('#an-diag', caixa).onclick = async () => {
@@ -196,8 +196,15 @@
     }
     const aviso = $$('.alert,.erro,.error,.msg,.mensagem,.text-danger,.invalid-feedback,[role=alert]')
       .filter(e => visivel(e) && !caixa.contains(e)).map(e => e.innerText.trim()).filter(Boolean).join(' | ');
-    return falhar(item, aviso ? 'A Sefaz respondeu: ' + aviso.slice(0, 200)
-      : 'A Sefaz voltou para o formulário sem mostrar o resultado. Confira a inscrição estadual da empresa.');
+    if (aviso) return falhar(item, 'A Sefaz respondeu: ' + aviso.slice(0, 200));
+    // Portal lento: tenta a mesma consulta mais uma vez antes de marcar erro.
+    item.tent = (item.tent || 0) + 1;
+    if (item.tent < 2) {
+      item.etapa = 'pendente'; item.clicou = false; await gravar(st);
+      dizer(`${item.nome} · ${item.tipo}: a Sefaz está lenta; tentando de novo em 20 s...`);
+      return irForm(20e3);
+    }
+    return falhar(item, 'A Sefaz demorou mais de 3 minutos para responder (tentei 2 vezes). Clique em Refazer erros mais tarde.');
   }
 
   async function pedirDownload(item) {
