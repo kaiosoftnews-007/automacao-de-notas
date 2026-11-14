@@ -873,7 +873,7 @@ async function telaAtualizacoes() {
         </tbody></table>` : '<div class="empty">Nenhum computador com nome ainda. Dê um nome no ícone da extensão.</div>'}</section>
       <section class="card pad"><h2>Como instalar ou atualizar</h2>
         <ol style="font-size:14px;color:var(--ink2);padding-left:20px;margin:12px 0 0;line-height:1.7">
-          <li>Baixe o zip e extraia numa pasta fixa.<div class="mono" style="margin:6px 0">Documentos\extensao-sefaz</div></li>
+          <li>Baixe o zip e extraia numa pasta fixa.<div class="mono" style="margin:6px 0">Documentos\\extensao-sefaz</div></li>
           <li>Abra <b>chrome://extensions</b> e ligue o <b>Modo do desenvolvedor</b>.</li>
           <li><b>Primeira vez:</b> Carregar sem compactação → escolha a pasta.</li>
           <li><b>Atualizar:</b> substitua os arquivos da pasta e clique em <b>recarregar</b> (↻) na extensão.</li>
