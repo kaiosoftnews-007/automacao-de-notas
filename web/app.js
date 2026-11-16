@@ -993,6 +993,7 @@ async function telaAtualizacoes() {
   const atras = pcs.filter(p => desatualizado(p, princ?.versao));
   const minhaExt = document.documentElement.dataset.automacaoNotas;   // versão da extensão neste Chrome (painel.js)
   const esteAtras = !!(princ && minhaExt && cmpVer(minhaExt, princ.versao) < 0);
+  const outrosAtras = atras.filter(p => p.id !== meuPc());   // este computador já aparece na frase de cima
   await layout('atualizacoes', `
     <div class="top"><div><div class="sub">Baixe a extensão do Chrome em qualquer computador</div><h1>Atualizações</h1></div></div>
     ${princ ? `<section class="card pad" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
@@ -1003,11 +1004,13 @@ async function telaAtualizacoes() {
       <button type="button" class="btn p" style="padding:0 22px" data-baixar="${h(princ.versao)}">Baixar extensão (.zip)</button>
     </section>` : '<div class="card empty">Nenhuma versão cadastrada.</div>'}
     <div class="sub" style="margin-top:-8px">Login dentro da extensão: ${login ? `<b>${h(login.email)}</b>` : '<b style="color:var(--err)">não configurado</b>'} · <a href="#" id="trocar-login">${login ? 'Alterar' : 'Configurar'}</a></div>
-    ${(atras.length || esteAtras) ? `<div class="card" style="background:var(--warn-bg);border-color:#E9C46A;padding:14px 18px;color:var(--warn);font-size:14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-      <div style="flex:1;min-width:260px"><b>Há uma versão nova: ${h(princ.versao)}.</b>
-        ${atras.length ? `${atras.map(p => `${h(p.nome)} (${h(p.versao || 'sem versão')})`).join(', ')} ${atras.length > 1 ? 'ainda não atualizaram' : 'ainda não atualizou'}.` : ''}
-        Os computadores com a 3.11.0 ou mais nova se atualizam <b>sozinhos</b> em até 1 minuto (assim que o computador está ligado com o Chrome aberto), quando não estão baixando notas (precisa do organizador novo).
-        ${minhaExt && cmpVer(minhaExt, '3.11.0') < 0 ? `<br>Este computador está na ${h(minhaExt)}, que ainda não se atualiza sozinha: baixe a ${h(princ.versao)} aqui e substitua os arquivos uma última vez.` : ''}</div>
+    ${(outrosAtras.length || esteAtras) ? `<div class="card" style="background:var(--warn-bg);border-color:#E9C46A;padding:14px 18px;color:var(--warn);font-size:14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+      <div style="flex:1;min-width:260px">
+        ${esteAtras ? (cmpVer(minhaExt, '3.11.0') >= 0
+          ? `<b>Este computador está na ${h(minhaExt)}; a ${h(princ.versao)} entra sozinha em até 1 minuto</b> (se não estiver baixando notas). Para não esperar, clique ao lado.`
+          : `<b>Este computador está na ${h(minhaExt)}, que ainda não se atualiza sozinha.</b> Baixe a ${h(princ.versao)} aqui e substitua os arquivos uma última vez.`) : ''}
+        ${outrosAtras.length ? `${esteAtras ? '<br>' : ''}<b>${outrosAtras.map(p => `${h(p.nome)} (${h(p.versao || 'sem versão')})`).join(', ')} ${outrosAtras.length > 1 ? 'ainda não atualizaram' : 'ainda não atualizou'}.</b> Atualiza${outrosAtras.length > 1 ? 'm' : ''} sozinho${outrosAtras.length > 1 ? 's' : ''} quando estiver${outrosAtras.length > 1 ? 'em' : ''} ligado${outrosAtras.length > 1 ? 's' : ''} com o Chrome aberto.` : ''}
+      </div>
       ${esteAtras && cmpVer(minhaExt, '3.11.0') >= 0 ? '<button type="button" class="btn p" style="padding:0 18px" id="atualizar-este">Atualizar este computador agora</button>' : ''}
     </div>` : ''}
     <div class="cols">
