@@ -137,7 +137,9 @@
   async function irForm(espera = PAUSA) { await gravar(st); desenhar(); await dorme(espera); location.href = st.urlForm; }
 
   async function esperarVerificacao(seletorForm) {
-    const campo = () => $(`${seletorForm} [name="cf-turnstile-response"]`) || $('[name="cf-turnstile-response"]');
+    // A caixinha pode estar fora do formulário do botão: vale o token de qualquer caixinha já resolvida na tela.
+    const campo = () => { const no = $(`${seletorForm} [name="cf-turnstile-response"]`);
+      return no?.value ? no : ($$('[name="cf-turnstile-response"]').find(e => e.value) || no); };
     const t0 = Date.now(); let avisou = false;
     while (Date.now() - t0 < ESPERA_VERIFICACAO) {
       if (!(await ler())?.rodando) return false;
@@ -150,6 +152,9 @@
     }
     return false;
   }
+
+  // Tela do Histórico de Downloads (a tela de consulta também cita "Histórico" no texto, por isso olha a tabela).
+  const naTelaHistorico = () => !$('#cmpNumIeDest') && /Data de Solicita/i.test(texto());
 
   function setar(sel, valor) {
     const e = $(sel); if (!e) throw new Error(`campo ${sel} não encontrado na tela`);
@@ -216,18 +221,32 @@
     const baixar = porTexto(/^Baixar$/i, 'button,a,input[type=button],input[type=submit]').pop();
     if (!baixar) return falhar(item, 'Não achei o botão "Baixar" para confirmar o pedido.');
     item.etapa = 'pedindo'; item.pedidoEm = Date.now(); await gravar(st);
-    await clicar(baixar); await dorme(5000);
+    await clicar(baixar); await dorme(3000);
+    for (let i = 0; i < 15 && !naTelaHistorico(); i++) await dorme(1000);   // o Baixar leva para o Histórico
     return pedido(item);                         // se a tela recarregar antes, o passo() faz isto
   }
 
   async function pedido(item) {
-    item.etapa = 'pedido'; item.pedidoEm = item.pedidoEm || Date.now(); await banco(item, { status: 'fila', qtd_notas: item.n, mensagem: 'Na fila da Sefaz' }); return irForm();
+    item.etapa = 'pedido'; item.pedidoEm = item.pedidoEm || Date.now(); await banco(item, { status: 'fila', qtd_notas: item.n, mensagem: 'Na fila da Sefaz' });
+    // Último pedido da empresa: a Sefaz já abriu o Histórico, então espera aqui mesmo (sem voltar à consulta
+    // e sem passar de novo pela verificação "Confirme que é humano").
+    const resta = st.fila.some(i => i.empresa_id === item.empresa_id && ['pendente', 'consultando'].includes(i.etapa));
+    if (!resta) {
+      Object.assign(st, { fase: 'historico', histAberto: false, tentHist: 0 }); await gravar(st);
+      if (naTelaHistorico()) return historico();
+    }
+    return irForm();
   }
 
   // ---------------------------------------------------------------- histórico
   async function historico() {
     const linhas = $$('table tbody tr').filter(tr => !caixa.contains(tr));
-    if (!st.histAberto && $('#btnHistoricoDownload')) {
+    const naHist = naTelaHistorico();
+    if (naHist && location.href !== st.urlForm) st.urlHist = location.href;
+    if (!naHist && !$('#btnHistoricoDownload') && st.urlHist && !st.histUrlRuim) {
+      st.histUrlRuim = true; return irForm();      // o endereço do Histórico não abriu direto: volta ao jeito antigo
+    }
+    if (!naHist && !st.histAberto && $('#btnHistoricoDownload')) {
       dizer('Abrindo o Histórico de Downloads (aguardando a verificação)...');
       if (!(await esperarVerificacao('#historicoDownload'))) return dizer('Aguardando alguém clicar na verificação. Depois clique em Continuar.');
       st.histAberto = true; await gravar(st); await clicar($('#btnHistoricoDownload'));
@@ -248,7 +267,8 @@
       (porIe[item.ie] = porIe[item.ie] || []).push(item);
     for (const [ie, itens] of Object.entries(porIe)) {
       itens.sort((a, b) => (a.pedidoEm || 0) - (b.pedidoEm || 0));
-      const recentes = linhas.filter(tr => so(tr.innerText).includes(ie))
+      const desde = Math.min(...itens.map(i => i.pedidoEm || Date.now())) - 6 * 3600e3;   // folga p/ relógio do PC
+      const recentes = linhas.filter(tr => so(tr.innerText).includes(ie) && (quando(tr) ?? Infinity) >= desde)
         .sort((a, b) => (quando(b) ?? 0) - (quando(a) ?? 0)).slice(0, itens.length).reverse();
       if (recentes.length < itens.length) continue;            // algum pedido ainda não apareceu no histórico
       itens.forEach((item, k) => { if (item.etapa === 'pedido' && !st.histUsadas.includes(chave(recentes[k]))) pares.push([item, recentes[k]]); });
@@ -283,7 +303,19 @@
       return proxima();
     }
     dizer(`${pend().map(i => `${i.nome} · ${i.tipo}`).join(', ')}: aguardando a Sefaz gerar o arquivo. Olho de novo em 20 s (${st.tentHist}/${MAX_HIST}).`);
+    if (naHist) return recarregarHistorico();
     return irForm(20e3);
+  }
+
+  // Atualiza o Histórico sem sair dele: botão de atualizar da própria tela, se houver; senão reabre o
+  // endereço do Histórico. Só se nada disso funcionar volta para a consulta (jeito antigo).
+  async function recarregarHistorico() {
+    await gravar(st); await dorme(20e3);
+    if (!(await ler())?.rodando) return dizer('Pausado.');
+    const botao = porTexto(/^(Atualizar|Recarregar|Pesquisar|Consultar)$/i, 'button,a,input[type=button],input[type=submit]')[0];
+    if (botao) { await clicar(botao); await dorme(4000); return historico(); }
+    if (st.urlHist && !st.histUrlRuim) { await gravar(st); location.href = st.urlHist; return; }
+    return irForm();
   }
 
   async function concluir() {
