@@ -1,6 +1,7 @@
 {
-  "versao": "3.10.2",
+  "versao": "3.10.3",
   "mudancas": [
-    "Atualização mais rápida: grava só os arquivos que mudaram (antes regravava todos)"
+    "Atualizar: se escolher a pasta de fora, a extensão acha sozinha a pasta de dentro com o manifest.json",
+    "Atualizar: mostra o motivo exato quando a escolha da pasta falha"
   ]
 }

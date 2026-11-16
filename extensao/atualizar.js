@@ -56,10 +56,39 @@ async function temPermissao(handle) {
   return (await handle.requestPermission(opc)) === 'granted';
 }
 
+// Procura a pasta da extensão na escolhida ou nas de dentro (até 3 níveis),
+// porque o zip extraído costuma criar pastas uma dentro da outra.
+async function acharPastaDaExtensao(handle, nivel = 0) {
+  if (await pastaEhDaExtensao(handle)) return handle;
+  if (nivel >= 3) return null;
+  try {
+    for await (const item of handle.values()) {
+      if (item.kind !== 'directory') continue;
+      const achou = await acharPastaDaExtensao(item, nivel + 1);
+      if (achou) return achou;
+    }
+  } catch { /* sem acesso a alguma subpasta: ignora */ }
+  return null;
+}
+
 async function escolherPasta() {
-  const handle = await window.showDirectoryPicker({ id: 'automacao-notas', mode: 'readwrite' });
-  if (!(await pastaEhDaExtensao(handle))) {
-    throw new Error('Essa pasta não é a da extensão. Escolha a pasta que tem o manifest.json da Automação de Notas.');
+  let escolhida;
+  try {
+    escolhida = await window.showDirectoryPicker({ id: 'automacao-notas', mode: 'readwrite' });
+  } catch (e) {
+    console.warn('showDirectoryPicker', e);
+    if (e && e.name === 'AbortError') {
+      throw new Error('A escolha da pasta foi cancelada. Depois de clicar em "Selecionar pasta", o Chrome pergunta se pode editar os arquivos: clique em "Editar arquivos". (detalhe: ' + e.name + ' - ' + e.message + ')');
+    }
+    throw new Error('O Chrome não abriu a escolha de pasta (detalhe: ' + (e && e.name) + ' - ' + (e && e.message) + ')');
+  }
+  const handle = await acharPastaDaExtensao(escolhida);
+  if (!handle) {
+    throw new Error('Não achei o manifest.json da Automação de Notas em "' + escolhida.name + '" nem nas pastas de dentro. Escolha a pasta que aparece em "Carregado de" em chrome://extensions.');
+  }
+  if ((await handle.queryPermission({ mode: 'readwrite' })) !== 'granted' &&
+      (await handle.requestPermission({ mode: 'readwrite' })) !== 'granted') {
+    throw new Error('O Chrome não deu permissão para gravar nessa pasta. Tente de novo e clique em "Editar arquivos".');
   }
   await guardarPasta(handle);
   return handle;
@@ -163,8 +192,8 @@ async function atualizar(forcarNova) {
     status(`Pronto: versão ${publicada.versao} instalada. Recarregando a extensão…`, 'ok');
     setTimeout(() => chrome.runtime.reload(), 1500);
   } catch (e) {
-    if (e && e.name === 'AbortError') status('Nenhuma pasta escolhida.', 'erro');
-    else status(e && e.message ? e.message : String(e), 'erro');
+    console.warn('atualizar', e);
+    status(e && e.message ? (e.name && e.name !== 'Error' ? e.name + ': ' : '') + e.message : String(e), 'erro');
   } finally {
     $('atualizar').disabled = $('outra').disabled = false;
   }
