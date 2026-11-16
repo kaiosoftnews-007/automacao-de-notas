@@ -289,9 +289,10 @@
       // Windows move para a pasta da empresa (sem pasta no cadastro, acha ou cria a pasta dentro da pasta mãe).
       const guia = JSON.stringify({ m: item.mae, c: item.codigo, n: item.nome, a: nomeArq });
       const b64 = btoa(unescape(encodeURIComponent(guia))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      await bg({ tipo: 'nomeDownload', nome: `Notas Sefaz/_organizar/${item.ie}_${item.tipo}_${mmaaaa}__${b64}.zip` });
+      // 3.9.1: ainda não é "concluído": o background acompanha o ZIP e só marca quando ele chegar na pasta.
+      await banco(item, { status: 'processando', qtd_notas: item.n, arquivo: final, mensagem: 'Baixando o ZIP da Sefaz...' });
+      await bg({ tipo: 'nomeDownload', nome: `Notas Sefaz/_organizar/${item.ie}_${item.tipo}_${mmaaaa}__${b64}.zip`, dl: item.dl || null });
       item.etapa = 'baixado'; await gravar(st);
-      await banco(item, { status: 'concluido', qtd_notas: item.n, arquivo: final, mensagem: null });
       dizer(`Baixando ${item.nome} · ${item.tipo}...`);
       await clicar(link); await dorme(5000);
     }

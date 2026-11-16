@@ -60,7 +60,10 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
     if (m.tipo === 'garantirSessao') { const { sessao } = await get('sessao'); if (!sessao && LOGIN_FIXO) await entrarFixo(); return true; }
     if (m.tipo === 'sair') return set({ sessao: null });
     if (m.tipo === 'api') { if (/^downloads/.test(m.caminho || '') && m.metodo && m.metodo !== 'GET') marcarVerificacao(false); return api(m); }
-    if (m.tipo === 'nomeDownload') return set({ proximoNome: { nome: m.nome, ate: Date.now() + 120000 } });
+    if (m.tipo === 'nomeDownload') {
+      if (m.dl) await mudarZips(z => { z[m.dl] = { em: Date.now() }; });   // 3.9.1: acompanha este ZIP até chegar na pasta
+      return set({ proximoNome: { nome: m.nome, dl: m.dl || null, ate: Date.now() + 120000 } });
+    }
     if (m.tipo === 'executar') return executar(m);
     if (m.tipo === 'salvarPc') return salvarPc(m.nome);
     if (m.tipo === 'lerPc') { const { pc, pcExcluido } = await get(['pc', 'pcExcluido']); return pc || (pcExcluido ? { excluido: pcExcluido } : null); }
@@ -183,7 +186,7 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
 chrome.downloads.onDeterminingFilename.addListener((item, sugerir) => {
   if (!/sefaz\.go\.gov\.br/.test(item.url + ' ' + (item.referrer || ''))) return;
   get('proximoNome').then(({ proximoNome: p }) => {
-    if (p && Date.now() < p.ate) { set({ proximoNome: null }); sugerir({ filename: p.nome, conflictAction: 'uniquify' }); }
+    if (p && Date.now() < p.ate) { set({ proximoNome: null }); if (p.dl) mudarZips(z => { if (z[p.dl]) z[p.dl].id = item.id; }); sugerir({ filename: p.nome, conflictAction: 'uniquify' }); }
     else sugerir();
   });
   return true;
@@ -322,7 +325,57 @@ async function sinal() {
 }
 
 chrome.alarms.create('sinal', { periodInMinutes: 1 });
-chrome.alarms.onAlarm.addListener(a => { if (a.name === 'sinal') sinal(); });
+chrome.alarms.onAlarm.addListener(a => { if (a.name === 'sinal') { sinal(); conferirZips(); } });
 chrome.runtime.onStartup.addListener(() => { sinal(); ligarRemocao(); });
 fixoPronto.then(ligarRemocao);
 sinal();
+
+
+// ================= 3.9.1: só marca "Concluído" quando o ZIP chegou na pasta =================
+// Antes o painel marcava OK antes de o download terminar. Agora cada ZIP é acompanhado:
+//   1) o Chrome terminou de baixar?  2) o organizador tirou o arquivo de Downloads\Notas Sefaz\_organizar?
+// Só então o download vira "Concluído". Se o Chrome interromper, ou o organizador não mover em 10 min
+// (organizador parado, pasta ou unidade G: fora do ar), vira "Erro" com o motivo. Se o arquivo for
+// movido depois, o painel se corrige sozinho para "Concluído".
+const MSG_MOVENDO = 'ZIP baixado. Aguardando o organizador mover para a pasta da empresa...';
+const MSG_PARADO = 'O ZIP foi baixado, mas não chegou na pasta da empresa: o organizador está parado ou a pasta (unidade G:) não está acessível. O arquivo está em Downloads\\Notas Sefaz\\_organizar.';
+let filaZips = Promise.resolve();
+function mudarZips(fn) {
+  filaZips = filaZips.then(async () => { const { zips } = await get('zips'); const z = zips || {}; try { await fn(z); } finally { await set({ zips: z }); } })
+    .catch(e => console.warn('zips:', e.message));
+  return filaZips;
+}
+const marcarDl = (dl, corpo) => api({ metodo: 'PATCH', caminho: `downloads?id=eq.${dl}`, corpo: { ...corpo, atualizado_em: new Date().toISOString() } });
+
+async function baixou(z, dl) { z[dl].fim = Date.now(); await marcarDl(dl, { status: 'processando', mensagem: MSG_MOVENDO }); }
+
+chrome.downloads.onChanged.addListener(d => {
+  const estado = d.state?.current;
+  if (estado !== 'complete' && estado !== 'interrupted') return;
+  mudarZips(async z => {
+    const dl = Object.keys(z).find(k => z[k].id === d.id); if (!dl) return;
+    if (estado === 'complete') return baixou(z, dl);
+    await marcarDl(dl, { status: 'erro', mensagem: 'O Chrome não terminou de baixar o ZIP (download interrompido). Baixe de novo.' });
+    delete z[dl];
+  }).then(() => setTimeout(conferirZips, 15e3));   // o organizador olha a pasta a cada 5 s
+});
+
+function conferirZips() {
+  return mudarZips(async z => {
+    for (const [dl, e] of Object.entries(z)) {
+      const item = e.id != null ? (await chrome.downloads.search({ id: e.id }))[0] : null;
+      if (!e.fim) {
+        if (item?.state === 'complete') await baixou(z, dl);
+        else if (Date.now() - e.em > (e.id != null ? 30 : 3) * 60e3) {
+          await marcarDl(dl, { status: 'erro', mensagem: e.id != null ? 'O ZIP não terminou de baixar em 30 minutos. Baixe de novo.' : 'O Chrome não começou o download do ZIP. Baixe de novo.' });
+          delete z[dl];
+        }
+        continue;
+      }
+      if (!item || !item.exists) { await marcarDl(dl, { status: 'concluido', mensagem: null }); delete z[dl]; continue; }   // saiu de _organizar: chegou na pasta
+      if (!e.avisado && Date.now() - e.fim > 10 * 60e3) { await marcarDl(dl, { status: 'erro', mensagem: MSG_PARADO }); e.avisado = true; }
+      if (Date.now() - e.fim > 7 * 24 * 3600e3) delete z[dl];
+    }
+  });
+}
+conferirZips();
