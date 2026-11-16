@@ -1,6 +1,7 @@
 {
-  "versao": "3.11.1",
+  "versao": "3.11.2",
   "mudancas": [
-    "Teste da atualização automática: o popup mostra \"atualização automática ligada\" ao lado da versão"
+    "Atualização automática confere a cada minuto e assim que o Chrome abre (antes: a cada 30 min)",
+    "Popup mostra \"atualização automática ligada\" ao lado da versão"
   ]
 }

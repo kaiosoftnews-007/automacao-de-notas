@@ -1006,7 +1006,7 @@ async function telaAtualizacoes() {
     ${(atras.length || esteAtras) ? `<div class="card" style="background:var(--warn-bg);border-color:#E9C46A;padding:14px 18px;color:var(--warn);font-size:14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
       <div style="flex:1;min-width:260px"><b>Há uma versão nova: ${h(princ.versao)}.</b>
         ${atras.length ? `${atras.map(p => `${h(p.nome)} (${h(p.versao || 'sem versão')})`).join(', ')} ${atras.length > 1 ? 'ainda não atualizaram' : 'ainda não atualizou'}.` : ''}
-        Os computadores com a 3.11.0 ou mais nova se atualizam <b>sozinhos</b> em até 30 minutos, quando não estão baixando notas (precisa do organizador novo).
+        Os computadores com a 3.11.0 ou mais nova se atualizam <b>sozinhos</b> em até 1 minuto (assim que o computador está ligado com o Chrome aberto), quando não estão baixando notas (precisa do organizador novo).
         ${minhaExt && cmpVer(minhaExt, '3.11.0') < 0 ? `<br>Este computador está na ${h(minhaExt)}, que ainda não se atualiza sozinha: baixe a ${h(princ.versao)} aqui e substitua os arquivos uma última vez.` : ''}</div>
       ${esteAtras && cmpVer(minhaExt, '3.11.0') >= 0 ? '<button type="button" class="btn p" style="padding:0 18px" id="atualizar-este">Atualizar este computador agora</button>' : ''}
     </div>` : ''}
@@ -1024,7 +1024,7 @@ async function telaAtualizacoes() {
           <li>Baixe o zip e extraia numa pasta fixa.<div class="mono" style="margin:6px 0">Documentos\\extensao-sefaz</div></li>
           <li>Abra <b>chrome://extensions</b> e ligue o <b>Modo do desenvolvedor</b>.</li>
           <li><b>Primeira vez:</b> Carregar sem compactação → escolha a pasta.</li>
-          <li><b>Atualizar:</b> automático (3.11.0 ou mais nova). Cada computador confere a cada 30 minutos e se atualiza sozinho quando não está baixando notas; o <b>organizador</b> (abaixo) precisa estar instalado. Versões antigas: substitua os arquivos da pasta e clique em <b>recarregar</b> (↻).</li>
+          <li><b>Atualizar:</b> automático (3.11.0 ou mais nova). Cada computador confere a cada minuto e se atualiza sozinho quando não está baixando notas; o <b>organizador</b> (abaixo) precisa estar instalado. Versões antigas: substitua os arquivos da pasta e clique em <b>recarregar</b> (↻).</li>
           <li>No ícone da extensão, dê um nome ao computador (ex.: PC-CASA).</li></ol></section>
     </div>
     <section class="card pad" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">

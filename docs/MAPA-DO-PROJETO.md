@@ -114,7 +114,7 @@ Mudança no banco = novo arquivo `0007_….sql` aqui **e** rodar no SQL Editor d
 | Mudou | Faça |
 |---|---|
 | `web/` | Push na `main` → o Cloudflare publica em 1–2 min. Aumente o `?v=` no `index.html`. Ctrl+F5 no painel. |
-| `extensao/` | Aumente `version` no `manifest.json`, escreva o que mudou em `scripts/mudancas-automacao-notas.json` e rode `node scripts/gerar_zips_extensoes.mjs` (gera `web/data/automacao-notas.zip` e `.json`). Antes do commit: `node scripts/verificar.mjs`. Push na `main` + migration da versão principal. Os computadores (3.11.0+) se atualizam **sozinhos** em até 30 min quando não estão baixando: a extensão baixa o zip para `_organizar` e o **organizador** grava na pasta da extensão (acha a pasta pelas Preferences do Chrome/Edge) e a extensão se recarrega. Andamento/erro na coluna `computadores.atualizacao` (tela Atualizações). |
+| `extensao/` | Aumente `version` no `manifest.json`, escreva o que mudou em `scripts/mudancas-automacao-notas.json` e rode `node scripts/gerar_zips_extensoes.mjs` (gera `web/data/automacao-notas.zip` e `.json`). Antes do commit: `node scripts/verificar.mjs`. Push na `main` + migration da versão principal. Os computadores (3.11.0+) se atualizam **sozinhos** em até 1 min quando não estão baixando: a extensão baixa o zip para `_organizar` e o **organizador** grava na pasta da extensão (acha a pasta pelas Preferences do Chrome/Edge) e a extensão se recarrega. Andamento/erro na coluna `computadores.atualizacao` (tela Atualizações). |
 | `organizador/` | Rodar de novo `INSTALAR-ORGANIZADOR.bat` (fecha o antigo e inicia o novo). |
 | Banco | Novo `supabase/migrations/000X_….sql` + rodar no SQL Editor. |
 

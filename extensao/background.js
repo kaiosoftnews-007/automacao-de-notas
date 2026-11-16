@@ -383,7 +383,7 @@ conferirZips();
 
 
 // ================= 3.11.0: atualização automática (sem escolher pasta) =================
-// A cada 30 min confere web/data/automacao-notas.json. Se há versão nova e nenhum download está
+// A cada minuto (e assim que o Chrome abre) confere web/data/automacao-notas.json. Se há versão nova e nenhum download está
 // rodando, baixa o zip para Downloads\Notas Sefaz\_organizar\atualizar-extensao.<id>.<versão>.zip.
 // O organizador grava os arquivos na pasta da extensão e deixa atualizacao-status.json lá;
 // quando esse arquivo confirma a versão, a extensão se recarrega. Andamento/erro vão para o painel
@@ -412,7 +412,7 @@ async function conferirAtualizacao(forcar = false) {
     await set({ atu: { conferido: atu.conferido, erro: `o organizador não aplicou a ${atu.alvo} em 10 minutos. ${MSG_ORG}`, erroVersao: atu.alvo, em: Date.now() } });
     if (!forcar) return;
   }
-  if (!forcar && Date.now() - (atu.conferido || 0) < 30 * 60e3) return;
+  if (!forcar && Date.now() - (atu.conferido || 0) < 50e3) return;
   const r = await fetch(`${DADOS_ATU}.json`, { cache: 'no-store' });
   if (!r.ok) throw new Error(`não consegui consultar a versão publicada (HTTP ${r.status})`);
   const { versao } = await r.json();
@@ -440,3 +440,4 @@ async function textoAtualizacao() {
 }
 chrome.alarms.create('atualizacao', { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener(a => { if (a.name === 'atualizacao') conferirAtualizacao().catch(e => console.warn('atualização:', e.message)); });
+chrome.runtime.onStartup.addListener(() => conferirAtualizacao().catch(() => {}));   // assim que o computador liga e o Chrome abre
