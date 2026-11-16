@@ -1,7 +1,6 @@
 {
-  "versao": "3.10.0",
+  "versao": "3.10.1",
   "mudancas": [
-    "Atualização com um clique: o popup avisa quando há versão nova e o botão Atualizar a extensão baixa, grava na pasta e recarrega sozinho",
-    "O credenciais.json da sua pasta nunca é alterado pela atualização"
+    "O popup agora mostra o número da versão instalada, embaixo do título"
   ]
 }

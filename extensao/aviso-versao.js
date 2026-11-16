@@ -2,6 +2,9 @@
 // Usa <div id="aviso-versao"> e <button id="abrir-atualizar"> do popup.html.
 import { maior, buscarPublicada } from './atualizacao-config.js';
 
+const versaoAtual = document.getElementById('versao-atual');
+if (versaoAtual) versaoAtual.textContent = `Versão ${chrome.runtime.getManifest().version}`;
+
 const botao = document.getElementById('abrir-atualizar');
 if (botao) {
   botao.addEventListener('click', () => {
