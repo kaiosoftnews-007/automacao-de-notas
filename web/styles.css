@@ -88,3 +88,6 @@ main{padding:32px 40px;display:flex;flex-direction:column;gap:20px;min-width:0}
 .tbl th .seta{color:var(--gold)}
 .tbl .chk-col{width:36px;padding-right:0;text-align:center}.tbl .chk-col input{width:16px;height:16px;accent-color:var(--navy);cursor:pointer;vertical-align:middle}
 .selbar{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#EAF0F8;border-color:#B9C8DD;font-size:14px}.selbar[hidden]{display:none}.selbar span{margin-right:auto}
+.seg{display:inline-flex;border:1px solid var(--field);border-radius:8px;overflow:hidden;align-self:flex-start}.seg button{border:0;background:#fff;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer;color:var(--ink2)}.seg button.on{background:var(--navy);color:#fff;font-weight:600}
+.proxima{background:#EAF0F8;border:1px solid #B9C8DD;border-radius:6px;padding:10px 12px;font-size:13px;color:var(--ink2);line-height:1.5}
+[hidden]{display:none!important}

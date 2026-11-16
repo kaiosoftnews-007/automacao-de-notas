@@ -122,6 +122,8 @@ def agendar():
     dia = (t.weekday() + 1) % 7  # 0 = domingo, como no site
     inicio_dia = t.replace(hour=0, minute=0, second=0, microsecond=0)
     for r in sel('rotinas', ativa='eq.true', select='*'):
+        if r.get('frequencia') == 'mensal':   # rotina mensal: quem dispara é a extensão (extensao_agendar)
+            continue
         if dia not in (r['dias_semana'] or []):
             continue
         h, m = map(int, str(r['horario'])[:5].split(':'))

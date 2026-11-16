@@ -310,6 +310,8 @@ async function sinal() {
     }
     if (!pc.chave) ligarRemocao();
     if (await ocupado()) return;
+    // Rotina automática (semanal ou mensal) dos escritórios que escolheram este computador.
+    await api({ metodo: 'POST', caminho: 'rpc/extensao_agendar', corpo: { p_pc: pc.id } }).catch(e => console.warn('agendar:', e.message));
     const [p] = await api({ metodo: 'POST', caminho: 'rpc/extensao_pegar_pedido', corpo: { p_pc: pc.id } }) || [];
     if (!p) return;
     await executar({ escritorio_id: p.escritorio_id, execucao_id: p.id, ie: p.ie, comp: p.competencia });

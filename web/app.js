@@ -354,7 +354,8 @@ function ligarSeletorPc(escritorioId) {
   const sel = $('#pc'); if (!sel) return;
   sel.onchange = async () => {
     gravarLocal('automacao-pc:' + escritorioId, sel.value);
-    if (sel.value && eAdmin()) await sb.from('escritorios').update({ pc_padrao: sel.value }).eq('id', escritorioId);
+    const pid = sel.value || meuPc();
+    if (pid && eAdmin()) await sb.from('escritorios').update({ pc_padrao: pid }).eq('id', escritorioId);
   };
 }
 
@@ -1036,7 +1037,7 @@ async function telaRotina(id) {
     carregarPcs(),
   ]);
   if (!es) return naoEncontrado('Escritório não encontrado', 'Abra a rotina pela página do escritório.');
-  const r = rot || { dias_semana: [1, 2, 3, 4, 5], horario: '06:00', periodo: 'mes_anterior', pasta_destino: 'C:\\Notas', tentativas: 3, avisar_email: true, resumo_diario: true, avisar_whatsapp: false, ativa: true };
+  const r = rot || { frequencia: 'semanal', dia_mes: 1, dias_semana: [1, 2, 3, 4, 5], horario: '06:00', periodo: 'mes_anterior', pasta_destino: 'C:\\Notas', tentativas: 3, avisar_email: true, resumo_diario: true, avisar_whatsapp: false, ativa: true };
   const ult = exes[0];
   const dls = ult ? await q(sb.from('downloads').select('*, empresas(razao_social,ie)').eq('execucao_id', ult.id).order('empresa_id')) : [];
   const nomePc = pcs.find(p => p.id === ult?.pc_id)?.nome;
@@ -1047,10 +1048,13 @@ async function telaRotina(id) {
       <section class="card pad" style="display:flex;flex-direction:column;gap:16px">
         <h2>Quando rodar</h2>
         <label class="chk"><input type="checkbox" name="ativa" ${r.ativa ? 'checked' : ''}>Rotina ligada</label>
-        <div class="f">Dias da semana<div style="display:flex;gap:6px;flex-wrap:wrap">${DIAS.map((d, i) => `<button type="button" class="day ${r.dias_semana.includes(i) ? 'on' : ''}" data-dia="${i}" aria-pressed="${r.dias_semana.includes(i)}">${d}</button>`).join('')}</div></div>
-        <div class="g2"><label class="f">Horário<input type="time" name="horario" value="${h(String(r.horario).slice(0, 5))}"></label>
-          <label class="f">Período das notas<select name="periodo"><option value="mes_anterior">Mês anterior</option><option value="mes_atual" ${r.periodo === 'mes_atual' ? 'selected' : ''}>Mês atual</option></select></label></div>
-        <label class="f">Tentativas quando der erro<select name="tentativas">${[1, 2, 3, 5].map(x => `<option ${x === r.tentativas ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+        <div class="f">Frequência<div class="seg" role="group" aria-label="Frequência"><button type="button" data-freq="semanal" class="${(r.frequencia || 'semanal') === 'semanal' ? 'on' : ''}">Toda semana</button><button type="button" data-freq="mensal" class="${r.frequencia === 'mensal' ? 'on' : ''}">Uma vez por mês</button></div></div>
+        <div class="f" id="blocoSemana">Dias da semana<div style="display:flex;gap:6px;flex-wrap:wrap">${DIAS.map((d, i) => `<button type="button" class="day ${r.dias_semana.includes(i) ? 'on' : ''}" data-dia="${i}" aria-pressed="${r.dias_semana.includes(i)}">${d}</button>`).join('')}</div></div>
+        <div class="g2"><label class="f" id="blocoMes">Dia do mês<select name="dia_mes">${[...Array(28)].map((_, k) => `<option value="${k + 1}" ${r.dia_mes === k + 1 ? 'selected' : ''}>Dia ${k + 1}</option>`).join('')}<option value="31" ${r.dia_mes >= 29 ? 'selected' : ''}>Último dia do mês</option></select></label>
+          <label class="f">Horário<input type="time" name="horario" value="${h(String(r.horario).slice(0, 5))}"></label></div>
+        <div class="g2"><label class="f">Período das notas<select name="periodo"><option value="mes_anterior">Mês anterior</option><option value="mes_atual" ${r.periodo === 'mes_atual' ? 'selected' : ''}>Mês atual</option></select></label>
+          <label class="f">Tentativas quando der erro<select name="tentativas">${[1, 2, 3, 5].map(x => `<option ${x === r.tentativas ? 'selected' : ''}>${x}</option>`).join('')}</select></label></div>
+        <div class="proxima" id="proxima"></div>
       </section>
       <section class="card pad" style="display:flex;flex-direction:column;gap:14px">
         <h2>Onde salvar e quem avisar</h2>
@@ -1068,19 +1072,57 @@ async function telaRotina(id) {
         ${dls.map(d => `<tr><td style="font-weight:600">${h(d.empresas?.razao_social)}</td><td>${h(d.empresas?.ie)}</td><td>${d.tipo === 'entrada' ? 'Entrada' : 'Saída'}</td><td class="c">${d.qtd_notas ?? '—'}</td><td><span class="pill ${ST_DL[d.status][0]}">${ST_DL[d.status][1]}</span></td><td class="sub">${h(d.mensagem || d.arquivo || '')}</td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">${!ult ? 'Nenhuma execução ainda.' : ult.status === 'aguardando_pc' ? `O ${h(nomePc || 'computador escolhido')} pega o pedido em até 1 minuto e baixa em segundo plano. As notas ficam salvas nele.` : 'Aguardando o robô começar.'}</div>`}
     </section>`);
-  $$('[data-dia]').forEach(bt => bt.onclick = () => { bt.classList.toggle('on'); bt.setAttribute('aria-pressed', bt.classList.contains('on')); });
+  // Frequência (toda semana / uma vez por mês) e o quadro "Próxima execução"
+  let freq = r.frequencia || 'semanal';
+  const pcRotina = () => { const v = $('#pc')?.value; return v || meuPc() || es.pc_padrao || null; };
+  const nomeDoPc = pid => pcs.find(p => p.id === pid)?.nome;
+  const proxima = () => {
+    const f = $('#f'); const [hh, mm] = (f.horario.value || '06:00').split(':').map(Number);
+    const dias = $$('[data-dia].on').map(b => +b.dataset.dia), dm = +f.dia_mes.value, agora = new Date();
+    let d = null;
+    if (freq === 'mensal') {
+      for (let k = 0; k < 3 && !d; k++) {
+        const base = new Date(agora.getFullYear(), agora.getMonth() + k, 1);
+        const ult = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
+        const c = new Date(base.getFullYear(), base.getMonth(), Math.min(dm, ult), hh, mm);
+        if (c > agora) d = c;
+      }
+    } else if (dias.length) {
+      for (let k = 0; k < 8 && !d; k++) { const c = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate() + k, hh, mm); if (dias.includes(c.getDay()) && c > agora) d = c; }
+    }
+    const box = $('#proxima');
+    if (!f.ativa.checked) { box.innerHTML = 'Rotina desligada: não roda sozinha.'; return; }
+    if (!d) { box.innerHTML = 'Escolha pelo menos um dia da semana.'; return; }
+    const comp = new Date(d.getFullYear(), d.getMonth() - (f.periodo.value === 'mes_atual' ? 0 : 1), 1);
+    const pid = pcRotina(), nome = nomeDoPc(pid);
+    box.innerHTML = `Próxima execução: <b>${DIAS[d.getDay()].toLowerCase()}, ${d.toLocaleDateString('pt-BR')} às ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}</b>${nome ? ` no computador <b>${h(nome)}</b>` : ''} — baixa as notas de <b>${compNome(iso(comp))}</b> de todas as empresas.<br>`
+      + (nome ? 'O computador precisa estar ligado e com o Chrome aberto nesse horário; se estiver desligado, roda assim que ligar.'
+              : '<b>Nenhum computador com nome:</b> dê um nome no ícone da extensão do computador que vai baixar e escolha ele em "Baixar em".');
+  };
+  const mostrarFreq = () => {
+    $$('[data-freq]').forEach(b => { b.classList.toggle('on', b.dataset.freq === freq); b.setAttribute('aria-pressed', b.dataset.freq === freq); });
+    $('#blocoSemana').hidden = freq !== 'semanal'; $('#blocoMes').hidden = freq !== 'mensal'; proxima();
+  };
+  $$('[data-freq]').forEach(b => b.onclick = () => { freq = b.dataset.freq; mostrarFreq(); });
+  $$('[data-dia]').forEach(bt => bt.onclick = () => { bt.classList.toggle('on'); bt.setAttribute('aria-pressed', bt.classList.contains('on')); proxima(); });
+  $('#f').addEventListener('change', proxima);
   ligarSeletorPc(id);
+  if ($('#pc')) $('#pc').addEventListener('change', proxima);
+  mostrarFreq();
   $('#agora').onclick = async () => { await pedirExecucao(id); telaRotina(id); };
   $('#f').onsubmit = async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
     await q(sb.from('rotinas').upsert({
-      escritorio_id: id, ativa: fd.has('ativa'), dias_semana: $$('[data-dia].on').map(b => +b.dataset.dia),
+      escritorio_id: id, ativa: fd.has('ativa'), frequencia: freq, dia_mes: +fd.get('dia_mes'), dias_semana: $$('[data-dia].on').map(b => +b.dataset.dia),
       horario: fd.get('horario'), periodo: fd.get('periodo'), tentativas: +fd.get('tentativas'), pasta_destino: fd.get('pasta_destino'),
       avisar_email: fd.has('avisar_email'), resumo_diario: fd.has('resumo_diario'), avisar_whatsapp: fd.has('avisar_whatsapp'),
       atualizada_em: new Date().toISOString(),
     }));
-    toast('Rotina salva.');
+    // A rotina roda no computador escolhido em "Baixar em" (também quando é "Este computador").
+    const pid = pcRotina();
+    if (pid && eAdmin() && pid !== es.pc_padrao) { await q(sb.from('escritorios').update({ pc_padrao: pid }).eq('id', id)); es.pc_padrao = pid; }
+    toast(pid ? `Rotina salva. Vai rodar no ${nomeDoPc(pid) || 'computador escolhido'}.` : 'Rotina salva. Falta um computador com nome para ela rodar sozinha.');
   };
 }
 
