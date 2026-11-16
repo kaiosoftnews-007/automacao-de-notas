@@ -1,7 +1,8 @@
 {
-  "versao": "3.10.3",
+  "versao": "3.11.0",
   "mudancas": [
-    "Atualizar: se escolher a pasta de fora, a extensão acha sozinha a pasta de dentro com o manifest.json",
-    "Atualizar: mostra o motivo exato quando a escolha da pasta falha"
+    "Atualização automática: a extensão confere a cada 30 min e se atualiza sozinha quando não está baixando notas",
+    "Quem grava os arquivos é o organizador (não pede mais para escolher pasta)",
+    "O aviso de versão nova e o botão Atualizar este computador agora ficam no painel, em Atualizações"
   ]
 }

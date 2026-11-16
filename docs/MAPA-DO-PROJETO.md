@@ -41,8 +41,7 @@ automacao-de-notas/
 │  ├─ painel.js             → roda no site: passa o login do painel e o botão "Baixar" para a extensão
 │  ├─ background.js         → central: fala com o Supabase, abre a aba da Sefaz, nomeia downloads, avisos
 │  ├─ login.js              → leva a aba até a consulta: login, card Acesso Restrito, menu Baixar XML NFE
-│  ├─ atualizar.html/.js    → página "Atualizar a extensão": baixa web/data/automacao-notas.zip, grava na pasta e recarrega
-│  ├─ aviso-versao.js       → no popup: avisa versão nova e abre atualizar.html (config em atualizacao-config.js; zip lido por lerzip.js)
+│  ├─ aviso-versao.js       → no popup: versão instalada e andamento da atualização automática (lógica no fim do background.js)
 │  ├─ content.js            → na tela de consulta: preenche, pesquisa, pede, espera o histórico e baixa
 │  └─ popup.html / popup.js → janelinha do ícone (login manual, escolher escritório)
 ├─ organizador/             → script do Windows que move os ZIPs para as pastas das empresas (baixado à parte em Atualizações)
@@ -115,7 +114,7 @@ Mudança no banco = novo arquivo `0007_….sql` aqui **e** rodar no SQL Editor d
 | Mudou | Faça |
 |---|---|
 | `web/` | Push na `main` → o Cloudflare publica em 1–2 min. Aumente o `?v=` no `index.html`. Ctrl+F5 no painel. |
-| `extensao/` | Aumente `version` no `manifest.json`, escreva o que mudou em `scripts/mudancas-automacao-notas.json` e rode `node scripts/gerar_zips_extensoes.mjs` (gera `web/data/automacao-notas.zip` e `.json`). Antes do commit: `node scripts/verificar.mjs`. Push na `main`. No PC: popup da extensão → **Atualizar a extensão** → **Atualizar agora** (grava na pasta e recarrega sozinha; o `credenciais.json` não é tocado). Só a 1ª instalação é manual. |
+| `extensao/` | Aumente `version` no `manifest.json`, escreva o que mudou em `scripts/mudancas-automacao-notas.json` e rode `node scripts/gerar_zips_extensoes.mjs` (gera `web/data/automacao-notas.zip` e `.json`). Antes do commit: `node scripts/verificar.mjs`. Push na `main` + migration da versão principal. Os computadores (3.11.0+) se atualizam **sozinhos** em até 30 min quando não estão baixando: a extensão baixa o zip para `_organizar` e o **organizador** grava na pasta da extensão (acha a pasta pelas Preferences do Chrome/Edge) e a extensão se recarrega. Andamento/erro na coluna `computadores.atualizacao` (tela Atualizações). |
 | `organizador/` | Rodar de novo `INSTALAR-ORGANIZADOR.bat` (fecha o antigo e inicia o novo). |
 | Banco | Novo `supabase/migrations/000X_….sql` + rodar no SQL Editor. |
 

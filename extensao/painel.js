@@ -19,6 +19,18 @@ function enviarSessao() {
 enviarSessao();
 setTimeout(enviarSessao, 3000);   // o site pode ainda estar entrando
 
+// Botão "Atualizar este computador agora" (tela Atualizações do painel)
+window.addEventListener('message', e => {
+  if (e.source !== window || e.data?.tipo !== 'automacao-notas:atualizar') return;
+  const responder = (r) => window.postMessage({ tipo: 'automacao-notas:atualizar-resposta', ...r }, location.origin);
+  try {
+    chrome.runtime.sendMessage({ tipo: 'atualizarAgora' }, r => {
+      const erro = chrome.runtime.lastError?.message || r?.erro;
+      responder(erro ? { erro } : { msg: r?.ok || 'Conferindo…' });
+    });
+  } catch (_) { responder({ erro: 'a extensão foi recarregada. Aperte F5 nesta página.' }); }
+});
+
 window.addEventListener('message', e => {
   if (e.source !== window || e.data?.tipo !== 'automacao-notas:executar') return;
   const erro = msg => window.postMessage({ tipo: 'automacao-notas:erro', msg }, location.origin);
