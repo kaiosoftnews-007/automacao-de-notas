@@ -1007,7 +1007,7 @@ async function telaAtualizacoes() {
     ${(outrosAtras.length || esteAtras) ? `<div class="card" style="background:var(--warn-bg);border-color:#E9C46A;padding:14px 18px;color:var(--warn);font-size:14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
       <div style="flex:1;min-width:260px">
         ${esteAtras ? (cmpVer(minhaExt, '3.11.0') >= 0
-          ? `<b>Este computador está na ${h(minhaExt)}; a ${h(princ.versao)} entra sozinha em até 1 minuto</b> (se não estiver baixando notas). Para não esperar, clique ao lado.`
+          ? `<b>Este computador está na ${h(minhaExt)}; a ${h(princ.versao)} entra sozinha em até ${minhaExt === '3.11.0' ? '30 minutos' : '1 minuto'}</b> (se não estiver baixando notas). Para não esperar, clique ao lado.`
           : `<b>Este computador está na ${h(minhaExt)}, que ainda não se atualiza sozinha.</b> Baixe a ${h(princ.versao)} aqui e substitua os arquivos uma última vez.`) : ''}
         ${outrosAtras.length ? `${esteAtras ? '<br>' : ''}<b>${outrosAtras.map(p => `${h(p.nome)} (${h(p.versao || 'sem versão')})`).join(', ')} ${outrosAtras.length > 1 ? 'ainda não atualizaram' : 'ainda não atualizou'}.</b> Atualiza${outrosAtras.length > 1 ? 'm' : ''} sozinho${outrosAtras.length > 1 ? 's' : ''} quando estiver${outrosAtras.length > 1 ? 'em' : ''} ligado${outrosAtras.length > 1 ? 's' : ''} com o Chrome aberto.` : ''}
       </div>
