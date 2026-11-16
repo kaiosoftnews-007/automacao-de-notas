@@ -4,7 +4,7 @@
   const el = document.getElementById('versao-atual');
   if (!el) return;
   const { atu = {} } = await chrome.storage.local.get('atu');
-  let txt = `Versão ${chrome.runtime.getManifest().version}`;
+  let txt = `Versão ${chrome.runtime.getManifest().version} · atualização automática ligada`;
   if (atu.alvo) txt += ` · atualizando para ${atu.alvo}…`;
   else if (atu.erro) txt += ' · a atualização automática falhou (veja em Atualizações, no painel)';
   el.textContent = txt;

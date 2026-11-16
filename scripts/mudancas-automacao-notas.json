@@ -1,5 +1,3 @@
 [
-  "Atualização automática: a extensão confere a cada 30 min e se atualiza sozinha quando não está baixando notas",
-  "Quem grava os arquivos é o organizador (não pede mais para escolher pasta)",
-  "O aviso de versão nova e o botão Atualizar este computador agora ficam no painel, em Atualizações"
+  "Teste da atualização automática: o popup mostra \"atualização automática ligada\" ao lado da versão"
 ]
