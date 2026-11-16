@@ -190,7 +190,17 @@
     // Tela em branco do Acesso Restrito (aberto sem passar pelo portal): volta ao portal e entra pelo card.
     if (topo && /loginPortal/i.test(location.pathname)) {
       await dorme(4000);
-      if (/loginPortal/i.test(location.pathname) && !texto().trim()) return irPara(PORTAL, 'entrando pelo portal da Sefaz...');
+      if (/loginPortal/i.test(location.pathname) && !texto().trim()) {
+        // O Acesso Restrito abriu em branco: a sessão do portal ficou ruim. Sai pelo Logout do próprio portal
+        // e entra de novo sozinha (até 2 vezes em 3 min) antes de pedir ajuda.
+        if (await conta('relogin', 2)) {
+          faixa('o Acesso Restrito abriu em branco; saindo e entrando de novo na Sefaz...');
+          await set({ login: {}, idas: {}, cliques: {}, cliquesCard: {}, captcha: {} });
+          return msg({ tipo: 'irPara', url: PORTAL + 'logout' });
+        }
+        faixa('o Acesso Restrito da Sefaz continua abrindo em branco, mesmo entrando de novo. Pode ser instabilidade da Sefaz: tente mais tarde.');
+        return avisar('O Acesso Restrito da Sefaz está abrindo em branco mesmo depois de entrar de novo. Tente mais tarde.');
+      }
       return;
     }
     const alvo = [...document.querySelectorAll('a,li,span,div,td')]
