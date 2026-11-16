@@ -287,8 +287,15 @@ async function carregarBase(escritorioId) {
 // Sem movimento: o download da competência terminou sem notas.
 const semMov = (b, emp, tipo) => { const d = b.dlMap[emp.id + tipo]; return !!d && (d.status === 'sem_notas' || (d.status === 'concluido' && !d.qtd_notas)); };
 const semMovTudo = (b, emp) => { const t = ['entrada', 'saida'].filter(x => emp['baixar_' + x]); return !!t.length && t.every(x => semMov(b, emp, x)); };
-// Importação de NFs de empresa sem movimento na entrada e na saída não tem o que importar: fica "Sem mov." (conta como entregue).
-const statusEnt = (b, emp, ob) => b.entMap[emp.id + ob] || (!emp.obrigacoes.includes(ob) ? 'na' : ob === 'impt_nfs' && semMovTudo(b, emp) ? 'semmov' : 'pendente');
+// Impt. NFs automática (enquanto ninguém marcou na mão), pelo download da competência:
+//   entrada e saída sem notas → "Sem mov."; download confirmado com notas em pelo menos um lado → OK;
+//   algum lado com erro, na fila ou ainda não baixado → Pend.
+function statusImpt(b, emp) {
+  const lados = ['entrada', 'saida'].filter(x => emp['baixar_' + x]).map(x => b.dlMap[emp.id + x]);
+  if (!lados.length || lados.some(d => !d || !['concluido', 'sem_notas'].includes(d.status))) return 'pendente';
+  return semMovTudo(b, emp) ? 'semmov' : 'ok';
+}
+const statusEnt = (b, emp, ob) => b.entMap[emp.id + ob] || (!emp.obrigacoes.includes(ob) ? 'na' : ob === 'impt_nfs' ? statusImpt(b, emp) : 'pendente');
 function statusDownload(b, emp) {
   if (!emp.ie) return ['na', 'Sem IE'];
   const e = b.dlMap[emp.id + 'entrada'], s = b.dlMap[emp.id + 'saida'];
@@ -497,7 +504,7 @@ async function telaEntregas(filtro = { esc: '', mostrar: 'todas', busca: '' }) {
       <label class="f">Buscar<input id="fbus" type="text" placeholder="Empresa, CNPJ ou IE" value="${h(filtro.busca)}" style="width:240px"></label>
     </div>
     <div class="card tbl-wrap">${linhas ? `<table class="tbl" id="tab"><thead><tr><th>Escritório / Empresa</th><th>Regime</th><th class="c">Notas E / S</th><th class="c">Download</th>${OBRIG.map(([, l]) => `<th class="c">${l}</th>`).join('')}</tr></thead><tbody>${linhas}</tbody></table>` : '<div class="empty">Nenhuma empresa para mostrar.</div>'}</div>
-    <div class="sub">Clique num status para trocar: Pendente → OK → N/A → Atraso. "Sem mov." = sem notas na entrada e na saída (não tem o que importar). Clique num card para ver só as pendentes dele; clique de novo para ver todas.</div>`);
+    <div class="sub">Clique num status para trocar: Pendente → OK → N/A → Atraso. Impt. NFs se marca sozinha pelo download: OK = notas baixadas; "Sem mov." = sem notas na entrada e na saída; Pend. = erro ou download ainda não confirmado. Clique num card para ver só as pendentes dele; clique de novo para ver todas.</div>`);
   const recarregar = () => telaEntregas({ esc: $('#fesc')?.value || '', mostrar: $('#fmos').value, busca: $('#fbus').value });
   $('#comp').onchange = e => { st.comp = e.target.value; recarregar(); };
   if ($('#fesc')) $('#fesc').onchange = recarregar;
