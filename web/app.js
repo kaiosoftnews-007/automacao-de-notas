@@ -10,8 +10,9 @@ const OBRIG = [
   ['efd_icms_ipi', 'EFD ICMS IPI'], ['efd_contrib', 'EFD Contrib.'], ['mit', 'MIT'], ['efd_reinf', 'EFD Reinf'],
 ];
 const REGIMES = { simples: 'Simples', presumido: 'Presumido', real: 'Real', mei: 'MEI', outro: 'Outro' };
-const ST_ENT = { ok: ['ok', 'OK'], pendente: ['pe', 'Pend.'], atrasado: ['er', 'Atraso'], na: ['na', '—'] };
-const CICLO = { pendente: 'ok', ok: 'na', na: 'atrasado', atrasado: 'pendente' };
+const ST_ENT = { ok: ['ok', 'OK'], pendente: ['pe', 'Pend.'], atrasado: ['er', 'Atraso'], na: ['na', '—'], semmov: ['sm', 'Sem mov.'] };
+const CICLO = { pendente: 'ok', ok: 'na', na: 'atrasado', atrasado: 'pendente', semmov: 'ok' };
+const FEITO = s => s === 'ok' || s === 'semmov';   // conta como entregue
 const ST_DL = {
   fila: ['pe', 'Na fila'], processando: ['pe', 'Baixando'], concluido: ['ok', 'OK'],
   sem_notas: ['pe', 'Sem notas'], erro: ['er', 'Erro'],
@@ -283,7 +284,11 @@ async function carregarBase(escritorioId) {
   for (const e of entregas) entMap[e.empresa_id + e.obrigacao] = e.status;
   return { escritorios, empresas, dlMap, entMap };
 }
-const statusEnt = (b, emp, ob) => b.entMap[emp.id + ob] || (emp.obrigacoes.includes(ob) ? 'pendente' : 'na');
+// Sem movimento: o download da competência terminou sem notas.
+const semMov = (b, emp, tipo) => { const d = b.dlMap[emp.id + tipo]; return !!d && (d.status === 'sem_notas' || (d.status === 'concluido' && !d.qtd_notas)); };
+const semMovTudo = (b, emp) => { const t = ['entrada', 'saida'].filter(x => emp['baixar_' + x]); return !!t.length && t.every(x => semMov(b, emp, x)); };
+// Importação de NFs de empresa sem movimento na entrada e na saída não tem o que importar: fica "Sem mov." (conta como entregue).
+const statusEnt = (b, emp, ob) => b.entMap[emp.id + ob] || (!emp.obrigacoes.includes(ob) ? 'na' : ob === 'impt_nfs' && semMovTudo(b, emp) ? 'semmov' : 'pendente');
 function statusDownload(b, emp) {
   if (!emp.ie) return ['na', 'Sem IE'];
   const e = b.dlMap[emp.id + 'entrada'], s = b.dlMap[emp.id + 'saida'];
@@ -439,16 +444,30 @@ async function telaPainel() {
 // ---------- visão de entregas ----------
 async function telaEntregas(filtro = { esc: '', mostrar: 'todas', busca: '' }) {
   const b = await carregarBase(eAdmin() ? null : st.perfil.escritorio_id);
-  const totais = Object.fromEntries(OBRIG.map(([k]) => [k, { ok: 0, tot: 0 }]));
-  for (const e of b.empresas) for (const [k] of OBRIG) {
-    const s = statusEnt(b, e, k); if (s !== 'na') { totais[k].tot++; if (s === 'ok') totais[k].ok++; }
-  }
+  // Cards: contam as empresas do escritório filtrado; clicar num card mostra só as pendentes daquela obrigação.
+  const doEsc = () => b.empresas.filter(e => !filtro.esc || e.escritorio_id === filtro.esc);
+  const kpisHtml = () => {
+    const base = doEsc();
+    const cards = OBRIG.map(([k, l]) => {
+      let ok = 0, tot = 0;
+      for (const e of base) { const s = statusEnt(b, e, k); if (s !== 'na') { tot++; if (FEITO(s)) ok++; } }
+      const pend = tot - ok;
+      return `<button type="button" class="card kpi clic ${filtro.mostrar === 'ob:' + k ? 'on' : ''}" data-kpi="ob:${k}" title="Mostrar só as pendentes de ${l}" style="padding:14px"><div class="l">${l}</div><div class="v" style="font-size:20px">${ok}<small> / ${tot}</small></div><div class="l" style="font-size:12px;margin-top:4px">${pend ? `${pend} pendente${pend > 1 ? 's' : ''}` : 'tudo entregue'}</div></button>`;
+    }).join('');
+    const sme = base.filter(e => e.baixar_entrada && semMov(b, e, 'entrada')).length, sms = base.filter(e => e.baixar_saida && semMov(b, e, 'saida')).length;
+    return cards + `<div class="card kpi" style="padding:14px"><div class="l">Sem movimento</div>
+      <button type="button" class="lnk ${filtro.mostrar === 'semmov_entrada' ? 'on' : ''}" data-kpi="semmov_entrada">Entrada: <b>${sme}</b></button>
+      <button type="button" class="lnk ${filtro.mostrar === 'semmov_saida' ? 'on' : ''}" data-kpi="semmov_saida">Saída: <b>${sms}</b></button></div>`;
+  };
   const busca = filtro.busca.toLowerCase();
   const visivel = e => {
     if (filtro.esc && e.escritorio_id !== filtro.esc) return false;
     if (busca && ![e.razao_social, e.cnpj, e.ie, e.codigo].some(x => String(x || '').toLowerCase().includes(busca))) return false;
     if (filtro.mostrar === 'pendencia' && !OBRIG.some(([k]) => ['pendente', 'atrasado'].includes(statusEnt(b, e, k)))) return false;
     if (filtro.mostrar === 'erro' && statusDownload(b, e)[0] !== 'er') return false;
+    if (filtro.mostrar.startsWith('ob:') && !['pendente', 'atrasado'].includes(statusEnt(b, e, filtro.mostrar.slice(3)))) return false;
+    if (filtro.mostrar === 'semmov_entrada' && !(e.baixar_entrada && semMov(b, e, 'entrada'))) return false;
+    if (filtro.mostrar === 'semmov_saida' && !(e.baixar_saida && semMov(b, e, 'saida'))) return false;
     return true;
   };
   const linhas = b.escritorios.map(es => {
@@ -470,24 +489,30 @@ async function telaEntregas(filtro = { esc: '', mostrar: 'todas', busca: '' }) {
       <div><div class="sub">${eAdmin() ? 'Todas as empresas de todos os escritórios' : 'Empresas do seu escritório'}</div><h1>Visão geral de entregas</h1></div>
       <button type="button" class="btn" id="exportar">Exportar Excel</button>
     </div>
-    <section class="kpis">${OBRIG.map(([k, l]) => `<div class="card kpi" style="padding:14px"><div class="l">${l}</div><div class="v" style="font-size:20px">${totais[k].ok}<small> / ${totais[k].tot}</small></div></div>`).join('')}</section>
+    <section class="kpis" id="kpis">${kpisHtml()}</section>
     <div class="filters">
       <label class="f">Competência<select id="comp">${compOpcoes()}</select></label>
       ${eAdmin() ? `<label class="f">Escritório<select id="fesc"><option value="">Todos</option>${b.escritorios.map(e => `<option value="${e.id}" ${e.id === filtro.esc ? 'selected' : ''}>${h(e.nome)}</option>`).join('')}</select></label>` : ''}
-      <label class="f">Mostrar<select id="fmos"><option value="todas">Todas as empresas</option><option value="pendencia" ${filtro.mostrar === 'pendencia' ? 'selected' : ''}>Só com pendência</option><option value="erro" ${filtro.mostrar === 'erro' ? 'selected' : ''}>Só com erro no download</option></select></label>
+      <label class="f">Mostrar<select id="fmos"><option value="todas">Todas as empresas</option><option value="pendencia" ${filtro.mostrar === 'pendencia' ? 'selected' : ''}>Só com pendência</option><option value="erro" ${filtro.mostrar === 'erro' ? 'selected' : ''}>Só com erro no download</option><option value="semmov_entrada" ${filtro.mostrar === 'semmov_entrada' ? 'selected' : ''}>Sem movimento na entrada</option><option value="semmov_saida" ${filtro.mostrar === 'semmov_saida' ? 'selected' : ''}>Sem movimento na saída</option>${OBRIG.map(([k, l]) => `<option value="ob:${k}" ${filtro.mostrar === 'ob:' + k ? 'selected' : ''}>Pendentes de ${l}</option>`).join('')}</select></label>
       <label class="f">Buscar<input id="fbus" type="text" placeholder="Empresa, CNPJ ou IE" value="${h(filtro.busca)}" style="width:240px"></label>
     </div>
     <div class="card tbl-wrap">${linhas ? `<table class="tbl" id="tab"><thead><tr><th>Escritório / Empresa</th><th>Regime</th><th class="c">Notas E / S</th><th class="c">Download</th>${OBRIG.map(([, l]) => `<th class="c">${l}</th>`).join('')}</tr></thead><tbody>${linhas}</tbody></table>` : '<div class="empty">Nenhuma empresa para mostrar.</div>'}</div>
-    <div class="sub">Clique num status para trocar: Pendente → OK → N/A → Atraso.</div>`);
+    <div class="sub">Clique num status para trocar: Pendente → OK → N/A → Atraso. "Sem mov." = sem notas na entrada e na saída (não tem o que importar). Clique num card para ver só as pendentes dele; clique de novo para ver todas.</div>`);
   const recarregar = () => telaEntregas({ esc: $('#fesc')?.value || '', mostrar: $('#fmos').value, busca: $('#fbus').value });
   $('#comp').onchange = e => { st.comp = e.target.value; recarregar(); };
   if ($('#fesc')) $('#fesc').onchange = recarregar;
   $('#fmos').onchange = recarregar;
   $('#fbus').onchange = recarregar;
+  const ligarKpis = () => $$('[data-kpi]').forEach(c => c.onclick = () => {
+    const v = c.dataset.kpi; $('#fmos').value = filtro.mostrar === v ? 'todas' : v; recarregar();
+  });
+  ligarKpis();
   $$('button.s').forEach(bt => bt.onclick = async () => {
     const novo = CICLO[bt.dataset.st];
     await q(sb.from('entregas').upsert({ empresa_id: bt.dataset.emp, competencia: st.comp, obrigacao: bt.dataset.ob, status: novo, atualizado_por: st.session.user.id, atualizado_em: new Date().toISOString() }));
     bt.dataset.st = novo; bt.className = 's ' + ST_ENT[novo][0]; bt.textContent = ST_ENT[novo][1];
+    b.entMap[bt.dataset.emp + bt.dataset.ob] = novo;
+    $('#kpis').innerHTML = kpisHtml(); ligarKpis();          // cards atualizam na hora
   });
   $('#exportar').onclick = async () => {
     const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
