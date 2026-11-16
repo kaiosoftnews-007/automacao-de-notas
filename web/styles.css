@@ -84,3 +84,7 @@ main{padding:32px 40px;display:flex;flex-direction:column;gap:20px;min-width:0}
 .btn.del-o{border-color:var(--err);color:#9B1C12;font-weight:600}
 .modal-fundo{position:fixed;inset:0;background:rgba(20,39,68,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
 .modal{width:100%;max-width:420px;padding:24px;display:flex;flex-direction:column;gap:14px}
+.tbl th.ord{cursor:pointer;user-select:none}.tbl th.ord:hover{background:var(--navy-d)}
+.tbl th .seta{color:var(--gold)}
+.tbl .chk-col{width:36px;padding-right:0;text-align:center}.tbl .chk-col input{width:16px;height:16px;accent-color:var(--navy);cursor:pointer;vertical-align:middle}
+.selbar{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#EAF0F8;border-color:#B9C8DD;font-size:14px}.selbar[hidden]{display:none}.selbar span{margin-right:auto}

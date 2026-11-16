@@ -56,7 +56,7 @@
         <button id="an-pausar" style="padding:7px">Pausar</button>
         <button id="an-erros" style="padding:7px">Refazer erros</button>
       </div>
-      <div style="margin-top:6px"><input id="an-ie" placeholder="Testar só uma IE (opcional)" style="width:100%;box-sizing:border-box;padding:5px"></div>
+      <div style="margin-top:6px"><input id="an-ie" placeholder="Só estas IEs (opcional, separe por vírgula)" style="width:100%;box-sizing:border-box;padding:5px"></div>
       <div id="an-lista" style="margin-top:8px;font-size:12px"></div>
       <button id="an-diag" style="margin-top:6px;font-size:11px">Copiar diagnóstico</button>`;
     document.body.appendChild(caixa);
@@ -103,8 +103,11 @@
       if (!sessao || !escritorio) return dizer('A extensão ainda não tem o login do painel: abra o painel (automacao-de-notas) neste Chrome, aperte F5 lá e depois clique em Iniciar aqui.');
       if (!$('#cmpNumIeDest')) return dizer('Abra a tela "Baixar XML NFE" (com os campos de período e inscrição) e clique em Iniciar de novo.');
       dizer('Buscando as empresas no painel...');
-      const ie = so($('#an-ie', caixa).value);
-      const emps = await bg({ tipo: 'api', caminho: `empresas?select=*&escritorio_id=eq.${escritorio.id}&ativa=eq.true&ie=not.is.null&order=razao_social${ie ? `&ie=eq.${ie}` : ''}` });
+      // Uma IE ou várias separadas por vírgula (empresas selecionadas no painel).
+      const ies = String($('#an-ie', caixa).value || '').split(/[,;\s]+/).map(so).filter(Boolean);
+      const ie = ies.join(', ');
+      const filtroIe = ies.length > 1 ? `&ie=in.(${ies.join(',')})` : ies.length ? `&ie=eq.${ies[0]}` : '';
+      const emps = await bg({ tipo: 'api', caminho: `empresas?select=*&escritorio_id=eq.${escritorio.id}&ativa=eq.true&ie=not.is.null&order=razao_social${filtroIe}` });
       const rot = (await bg({ tipo: 'api', caminho: `rotinas?select=periodo,pasta_destino&escritorio_id=eq.${escritorio.id}` }))[0];
       const h = new Date(), atual = rot?.periodo === 'mes_atual';
       let ini = new Date(h.getFullYear(), h.getMonth() - (atual ? 0 : 1), 1);

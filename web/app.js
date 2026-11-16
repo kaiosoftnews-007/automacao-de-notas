@@ -21,6 +21,7 @@ const ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke
 
 // ---------- estado ----------
 const st = { session: null, perfil: null, comp: compPadrao() };
+const selecao = {};   // empresas marcadas em cada escritório (IEs), para o botão Baixar selecionadas
 
 function compPadrao() { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return iso(d); }
 function iso(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; }
@@ -170,6 +171,56 @@ async function layout(ativo, conteudo) {
   </div>`;
   $('#sair').onclick = async () => { await sb.auth.signOut(); };
   $('#menu').onclick = () => $('#side').classList.toggle('open');
+  ligarOrdenacao();
+}
+
+// ---------- ordenar tabelas clicando no título da coluna ----------
+// Vale para toda tabela do painel (menos as agrupadas, como a Visão de entregas). Clicar de novo inverte.
+// A escolha fica guardada por tela, então continua igual ao trocar a competência ou voltar à tela.
+const ORD_DATA = /^(\d{2})\/(\d{2})\/(\d{4})(?:\D+(\d{2}):(\d{2}))?/;
+const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+function valorOrdem(td) {
+  if (!td) return null;
+  const t = (td.dataset.ord ?? td.innerText).trim();
+  if (!t || t === '—' || t === '-') return null;
+  if (td.dataset.ord != null && !isNaN(+t)) return +t;
+  let m = t.match(ORD_DATA);
+  if (m) return new Date(+m[3], m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0)).getTime();
+  m = t.match(/^([a-zç]{3})\/(\d{4})$/i);
+  if (m && MESES.includes(m[1].toLowerCase())) return +m[2] * 12 + MESES.indexOf(m[1].toLowerCase());
+  if (/^-?\d{1,3}(\.\d{3})*(,\d+)?$/.test(t) || /^-?\d+(,\d+)?$/.test(t)) return +t.replace(/\./g, '').replace(',', '.');
+  return t;
+}
+function ordenarTabela(tab, col, dir) {
+  const corpo = tab.tBodies[0]; if (!corpo) return;
+  [...corpo.rows].sort((a, b) => {
+    const x = valorOrdem(a.cells[col]), y = valorOrdem(b.cells[col]);
+    if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;   // vazio sempre no fim
+    const r = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'pt-BR', { numeric: true, sensitivity: 'base' });
+    return dir * r;
+  }).forEach(tr => corpo.appendChild(tr));
+  [...tab.tHead.rows[0].cells].forEach((th, i) => {
+    th.querySelector('.seta')?.remove();
+    if (th.classList.contains('ord')) th.setAttribute('aria-sort', i === col ? (dir > 0 ? 'ascending' : 'descending') : 'none');
+    if (i === col) th.insertAdjacentHTML('beforeend', `<span class="seta">${dir > 0 ? ' ▲' : ' ▼'}</span>`);
+  });
+}
+function ligarOrdenacao() {
+  const tela = location.hash.split('?')[0].replace(/\/[0-9a-f-]{36}/gi, '/:id') || '#/';
+  $$('main table.tbl').forEach((tab, n) => {
+    if (!tab.tHead || !tab.tBodies[0] || tab.querySelector('tr.grp')) return;
+    const chave = `automacao-ordem:${tela}:${n}`;
+    [...tab.tHead.rows[0].cells].forEach((th, i) => {
+      if (th.hasAttribute('data-nosort') || !th.textContent.trim()) return;
+      th.classList.add('ord'); th.title = 'Clique para ordenar';
+      th.onclick = () => {
+        let atual = null; try { atual = JSON.parse(lerLocal(chave) || 'null'); } catch (_) {}
+        const dir = atual?.col === i ? -atual.dir : 1;
+        gravarLocal(chave, JSON.stringify({ col: i, dir })); ordenarTabela(tab, i, dir);
+      };
+    });
+    try { const o = JSON.parse(lerLocal(chave) || 'null'); if (o && tab.tHead.rows[0].cells[o.col]?.classList.contains('ord')) ordenarTabela(tab, o.col, o.dir); } catch (_) {}
+  });
 }
 
 // ---------- login ----------
@@ -496,10 +547,13 @@ async function telaEscritorio(id, aba = 'empresas') {
     if (OBRIG.every(([k]) => !['pendente', 'atrasado'].includes(statusEnt(b, e, k)))) emDia++;
   }
   let corpo = '';
+  const sel = selecao[id] = selecao[id] || new Set();
+  const ORD_DL = { Erro: 0, 'Atenção': 1, 'Na fila': 2, 'Não baixado': 3, OK: 4, Desligado: 5, 'Sem IE': 6 };
   if (aba === 'empresas') {
-    corpo = `<div class="card tbl-wrap">${b.empresas.length ? `<table class="tbl"><thead><tr><th>Cód.</th><th>Empresa</th><th>IE</th><th>CNPJ</th><th>Regime</th><th class="c">Entrada</th><th class="c">Saída</th><th>Download</th><th></th></tr></thead><tbody>
-      ${b.empresas.map(e => { const [c, l] = statusDownload(b, e); return `<tr class="click" data-href="#/empresa/${e.id}"><td>${h(e.codigo || '')}</td><td style="font-weight:600">${h(e.razao_social)}</td><td>${h(e.ie || '—')}</td><td>${h(e.cnpj || '—')}</td><td>${REGIMES[e.regime] || '—'}</td>
-        <td class="c">${qtd(b, e, 'entrada') ?? '—'}</td><td class="c">${qtd(b, e, 'saida') ?? '—'}</td><td><span class="pill ${c}">${l}</span></td><td style="text-align:right;white-space:nowrap">${e.ie ? `<button type="button" class="btn s" data-baixar-ie="${h(e.ie)}" title="Baixar só esta empresa">Baixar</button> ` : ''}<a class="btn s" href="#/empresa/${e.id}" style="display:inline-flex;align-items:center;text-decoration:none">Editar</a></td></tr>`; }).join('')}
+    corpo = `<div class="selbar card" id="selbar" hidden><span id="selqtd"></span><button type="button" class="btn p" id="baixarSel">Baixar selecionadas</button><button type="button" class="btn" id="limparSel">Limpar seleção</button></div>
+    <div class="card tbl-wrap">${b.empresas.length ? `<table class="tbl"><thead><tr><th data-nosort class="chk-col"><input type="checkbox" id="selTodas" title="Selecionar todas" aria-label="Selecionar todas"></th><th>Cód.</th><th>Empresa</th><th>IE</th><th>CNPJ</th><th>Regime</th><th class="c">Entrada</th><th class="c">Saída</th><th>Download</th><th></th></tr></thead><tbody>
+      ${b.empresas.map(e => { const [c, l] = statusDownload(b, e); return `<tr class="click" data-href="#/empresa/${e.id}"><td class="chk-col">${e.ie ? `<input type="checkbox" class="selEmp" data-ie="${h(e.ie)}" aria-label="Selecionar ${h(e.razao_social)}" ${sel.has(e.ie) ? 'checked' : ''}>` : ''}</td><td>${h(e.codigo || '')}</td><td style="font-weight:600">${h(e.razao_social)}</td><td>${h(e.ie || '—')}</td><td>${h(e.cnpj || '—')}</td><td>${REGIMES[e.regime] || '—'}</td>
+        <td class="c">${qtd(b, e, 'entrada') ?? '—'}</td><td class="c">${qtd(b, e, 'saida') ?? '—'}</td><td data-ord="${ORD_DL[l] ?? 9}"><span class="pill ${c}">${l}</span></td><td style="text-align:right;white-space:nowrap">${e.ie ? `<button type="button" class="btn s" data-baixar-ie="${h(e.ie)}" title="Baixar só esta empresa">Baixar</button> ` : ''}<a class="btn s" href="#/empresa/${e.id}" style="display:inline-flex;align-items:center;text-decoration:none">Editar</a></td></tr>`; }).join('')}
       </tbody></table>` : `<div class="empty">Nenhuma empresa ainda. <a href="#/empresa/novo?esc=${id}">Cadastre</a> ou importe sua planilha.</div>`}</div>`;
   } else if (aba === 'downloads') {
     const dls = await q(sb.from('downloads').select('*, empresas(razao_social)').eq('escritorio_id', id).order('atualizado_em', { ascending: false }).limit(100));
@@ -553,6 +607,31 @@ async function telaEscritorio(id, aba = 'empresas') {
   ligarSeletorPc(id);
   $('#baixar').onclick = () => pedirExecucao(id);
   $$('[data-baixar-ie]').forEach(bt => bt.onclick = ev => { ev.stopPropagation(); pedirExecucao(id, bt.dataset.baixarIe); });
+  // Selecionar algumas empresas e baixar só elas
+  const caixas = () => $$('.selEmp');
+  const atualizarSel = () => {
+    const bar = $('#selbar'); if (!bar) return;
+    bar.hidden = !sel.size;
+    $('#selqtd').innerHTML = `<b>${sel.size}</b> ${sel.size === 1 ? 'empresa selecionada' : 'empresas selecionadas'}`;
+    const todas = $('#selTodas'), total = caixas().length;
+    if (todas) { todas.checked = !!total && sel.size === total; todas.indeterminate = sel.size > 0 && sel.size < total; }
+  };
+  caixas().forEach(cx => {
+    cx.onclick = ev => ev.stopPropagation();
+    cx.onchange = () => { cx.checked ? sel.add(cx.dataset.ie) : sel.delete(cx.dataset.ie); atualizarSel(); };
+    cx.parentElement.onclick = ev => { ev.stopPropagation(); if (ev.target !== cx) { cx.checked = !cx.checked; cx.onchange(); } };
+  });
+  if ($('#selTodas')) {
+    $('#selTodas').parentElement.onclick = ev => ev.stopPropagation();
+    $('#selTodas').onchange = e => { caixas().forEach(cx => { cx.checked = e.target.checked; cx.checked ? sel.add(cx.dataset.ie) : sel.delete(cx.dataset.ie); }); atualizarSel(); };
+  }
+  if ($('#limparSel')) $('#limparSel').onclick = () => { sel.clear(); caixas().forEach(cx => cx.checked = false); atualizarSel(); };
+  if ($('#baixarSel')) $('#baixarSel').onclick = async () => {
+    const ies = [...sel]; if (!ies.length) return;
+    await pedirExecucao(id, ies.join(','));
+    sel.clear(); caixas().forEach(cx => cx.checked = false); atualizarSel();
+  };
+  atualizarSel();
   if ($('#editarEsc')) $('#editarEsc').onclick = async () => {
     if (await editarEscritorio(es)) telaEscritorio(id, aba);
   };
