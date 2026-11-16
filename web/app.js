@@ -57,6 +57,17 @@ async function q(promise) {
   if (error) { console.error(error); toast('Erro: ' + error.message); throw error; }
   return data;
 }
+// O Supabase devolve no máximo 1.000 linhas por consulta. Aqui busca de 1.000 em 1.000 até acabar,
+// para os números do painel não ficarem errados (sem aviso) quando houver mais empresas e downloads.
+// "montar" devolve a consulta nova a cada página; ela precisa ter uma ordem fixa (por isso o .order('id')).
+async function todos(montar) {
+  const tudo = [];
+  for (let de = 0; ; de += 1000) {
+    const parte = await q(montar().range(de, de + 999));
+    tudo.push(...parte);
+    if (parte.length < 1000) return tudo;
+  }
+}
 const eAdmin = () => st.perfil?.papel === 'admin';
 
 // Janela para editar os dados do escritório. Devolve true se salvou.
@@ -268,14 +279,13 @@ function telaNovaSenha() {
 
 // ---------- dados comuns ----------
 async function carregarBase(escritorioId) {
-  let emp = sb.from('empresas').select('*').eq('ativa', true).order('razao_social');
-  if (escritorioId) emp = emp.eq('escritorio_id', escritorioId);
-  let dl = sb.from('downloads').select('empresa_id,tipo,status,qtd_notas,mensagem,atualizado_em').eq('competencia', st.comp).order('atualizado_em');
-  if (escritorioId) dl = dl.eq('escritorio_id', escritorioId);
+  const doEsc = c => escritorioId ? c.eq('escritorio_id', escritorioId) : c;
+  const emp = () => doEsc(sb.from('empresas').select('*').eq('ativa', true)).order('razao_social').order('id');
+  const dl = () => doEsc(sb.from('downloads').select('empresa_id,tipo,status,qtd_notas,mensagem,atualizado_em').eq('competencia', st.comp)).order('atualizado_em').order('id');
   const [escritorios, empresas, downloads, entregas] = await Promise.all([
     q(sb.from('escritorios').select('*').order('nome')),
-    q(emp), q(dl),
-    q(sb.from('entregas').select('empresa_id,obrigacao,status').eq('competencia', st.comp)),
+    todos(emp), todos(dl),
+    todos(() => sb.from('entregas').select('empresa_id,obrigacao,status').eq('competencia', st.comp).order('empresa_id').order('obrigacao')),
   ]);
   // último download de cada empresa/tipo
   const dlMap = {};
@@ -534,7 +544,7 @@ async function telaEscritorios() {
   if (!eAdmin()) return go('#/escritorio/' + st.perfil.escritorio_id);
   const [escs, emps, creds] = await Promise.all([
     q(sb.from('escritorios').select('*').order('nome')),
-    q(sb.from('empresas').select('escritorio_id').eq('ativa', true)),
+    todos(() => sb.from('empresas').select('escritorio_id').eq('ativa', true).order('id')),
     q(sb.from('credenciais_sefaz').select('escritorio_id,situacao')),
   ]);
   const sit = Object.fromEntries(creds.map(c => [c.escritorio_id, c.situacao]));
@@ -805,7 +815,7 @@ async function telaAlertas(f = { aba: 'abertos', tipo: '', esc: '' }) {
   if (f.esc) qr = qr.eq('escritorio_id', f.esc);
   const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
   const [lista, abertos, resolvHoje, escs] = await Promise.all([
-    q(qr), q(sb.from('alertas').select('tipo').is('resolvido_em', null)),
+    q(qr), todos(() => sb.from('alertas').select('tipo').is('resolvido_em', null).order('id')),
     sb.from('alertas').select('id', { count: 'exact', head: true }).gte('resolvido_em', hoje.toISOString()),
     q(sb.from('escritorios').select('id,nome').order('nome')),
   ]);
@@ -1071,7 +1081,7 @@ async function telaRotina(id) {
   if (!es) return naoEncontrado('Escritório não encontrado', 'Abra a rotina pela página do escritório.');
   const r = rot || { frequencia: 'semanal', dia_mes: 1, dias_semana: [1, 2, 3, 4, 5], horario: '06:00', periodo: 'mes_anterior', pasta_destino: 'C:\\Notas', tentativas: 3, avisar_email: true, resumo_diario: true, avisar_whatsapp: false, ativa: true };
   const ult = exes[0];
-  const dls = ult ? await q(sb.from('downloads').select('*, empresas(razao_social,ie)').eq('execucao_id', ult.id).order('empresa_id')) : [];
+  const dls = ult ? await todos(() => sb.from('downloads').select('*, empresas(razao_social,ie)').eq('execucao_id', ult.id).order('empresa_id').order('id')) : [];
   const nomePc = pcs.find(p => p.id === ult?.pc_id)?.nome;
   const EXE = { pendente: ['pe', 'Aguardando robô'], aguardando_pc: ['pe', 'Aguardando o ' + (nomePc || 'computador escolhido')], rodando: ['pe', nomePc ? 'Rodando no ' + nomePc : 'Rodando'], concluida: ['ok', 'Concluída'], com_erros: ['pe', 'Concluída com erros'], falhou: ['er', 'Falhou'] };
   await layout('rotina', `
