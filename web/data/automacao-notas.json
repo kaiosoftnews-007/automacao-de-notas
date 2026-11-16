@@ -1,6 +1,6 @@
 {
-  "versao": "3.10.1",
+  "versao": "3.10.2",
   "mudancas": [
-    "O popup agora mostra o número da versão instalada, embaixo do título"
+    "Atualização mais rápida: grava só os arquivos que mudaram (antes regravava todos)"
   ]
 }

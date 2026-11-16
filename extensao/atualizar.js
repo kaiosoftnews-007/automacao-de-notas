@@ -88,6 +88,20 @@ async function gravar(raiz, caminho, dados) {
   await w.close();
 }
 
+// true se o arquivo já existe na pasta com exatamente o mesmo conteúdo
+async function igualAoDaPasta(raiz, caminho, dados) {
+  try {
+    const partes = caminho.split('/');
+    let dir = raiz;
+    for (const p of partes.slice(0, -1)) dir = await dir.getDirectoryHandle(p);
+    const atual = await (await dir.getFileHandle(partes.at(-1))).getFile();
+    if (atual.size !== dados.length) return false;
+    const b = new Uint8Array(await atual.arrayBuffer());
+    for (let i = 0; i < b.length; i++) if (b[i] !== dados[i]) return false;
+    return true;
+  } catch { return false; }
+}
+
 async function atualizar(forcarNova) {
   $('atualizar').disabled = $('outra').disabled = true;
   try {
@@ -129,13 +143,20 @@ async function atualizar(forcarNova) {
       throw new Error(`O zip publicado está na versão ${m.version}, mas o aviso diz ${publicada.versao}. Tente mais tarde.`);
     }
 
-    // 4) grava: manifest.json por último
-    let n = 0;
+    // 4) grava só o que mudou (cada gravação passa pela verificação do Chrome/antivírus e é lenta);
+    //    manifest.json sempre, e por último
+    status('Conferindo quais arquivos mudaram…');
+    const mudaram = [];
     for (const a of arquivos) {
-      if (a === novoManifest) continue;
-      status(`Gravando arquivos… (${++n}/${arquivos.length})`);
+      if (a !== novoManifest && !(await igualAoDaPasta(pasta, a.rel, a.dados))) mudaram.push(a);
+    }
+    const total = mudaram.length + 1;
+    let n = 0;
+    for (const a of mudaram) {
+      status(`Gravando arquivos alterados… (${++n}/${total})`);
       await gravar(pasta, a.rel, a.dados);
     }
+    status(`Gravando arquivos alterados… (${total}/${total})`);
     await gravar(pasta, 'manifest.json', novoManifest.dados);
 
     // 5) recarrega
