@@ -41,6 +41,8 @@ automacao-de-notas/
 │  ├─ painel.js             → roda no site: passa o login do painel e o botão "Baixar" para a extensão
 │  ├─ background.js         → central: fala com o Supabase, abre a aba da Sefaz, nomeia downloads, avisos
 │  ├─ login.js              → leva a aba até a consulta: login, card Acesso Restrito, menu Baixar XML NFE
+│  ├─ atualizar.html/.js    → página "Atualizar a extensão": baixa web/data/automacao-notas.zip, grava na pasta e recarrega
+│  ├─ aviso-versao.js       → no popup: avisa versão nova e abre atualizar.html (config em atualizacao-config.js; zip lido por lerzip.js)
 │  ├─ content.js            → na tela de consulta: preenche, pesquisa, pede, espera o histórico e baixa
 │  └─ popup.html / popup.js → janelinha do ícone (login manual, escolher escritório)
 ├─ organizador/             → script do Windows que move os ZIPs para as pastas das empresas (baixado à parte em Atualizações)
@@ -113,7 +115,7 @@ Mudança no banco = novo arquivo `0007_….sql` aqui **e** rodar no SQL Editor d
 | Mudou | Faça |
 |---|---|
 | `web/` | Push na `main` → o Cloudflare publica em 1–2 min. Aumente o `?v=` no `index.html`. Ctrl+F5 no painel. |
-| `extensao/` | Aumente `version` no `manifest.json`. No PC: extraia por cima da mesma pasta → ↻ em `chrome://extensions` → feche as abas da Sefaz → F5 no painel. |
+| `extensao/` | Aumente `version` no `manifest.json`, escreva o que mudou em `scripts/mudancas-automacao-notas.json` e rode `node scripts/gerar_zips_extensoes.mjs` (gera `web/data/automacao-notas.zip` e `.json`). Antes do commit: `node scripts/verificar.mjs`. Push na `main`. No PC: popup da extensão → **Atualizar a extensão** → **Atualizar agora** (grava na pasta e recarrega sozinha; o `credenciais.json` não é tocado). Só a 1ª instalação é manual. |
 | `organizador/` | Rodar de novo `INSTALAR-ORGANIZADOR.bat` (fecha o antigo e inicia o novo). |
 | Banco | Novo `supabase/migrations/000X_….sql` + rodar no SQL Editor. |
 
