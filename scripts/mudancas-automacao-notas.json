@@ -1,4 +1,5 @@
 [
-  "Atualização automática confere a cada minuto e assim que o Chrome abre (antes: a cada 30 min)",
-  "Popup mostra \"atualização automática ligada\" ao lado da versão"
+  "Volta a atualização pela página da extensão (modelo SGD Integra): na 1ª vez escolhe a pasta, nas próximas só clica em Atualizar agora",
+  "Não precisa do organizador para atualizar a extensão",
+  "Se a escolha da pasta falhar, a página mostra o motivo exato"
 ]

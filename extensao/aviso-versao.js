@@ -1,11 +1,7 @@
-// Popup: mostra a versão instalada e, se houver, o andamento da atualização automática.
+// Popup: versão instalada + botão que abre a página de atualização.
 // O aviso de versão nova fica no painel, em Atualizações.
-(async () => {
-  const el = document.getElementById('versao-atual');
-  if (!el) return;
-  const { atu = {} } = await chrome.storage.local.get('atu');
-  let txt = `Versão ${chrome.runtime.getManifest().version} · atualização automática ligada`;
-  if (atu.alvo) txt += ` · atualizando para ${atu.alvo}…`;
-  else if (atu.erro) txt += ' · a atualização automática falhou (veja em Atualizações, no painel)';
-  el.textContent = txt;
-})();
+const el = document.getElementById('versao-atual');
+if (el) el.textContent = `Versão ${chrome.runtime.getManifest().version}`;
+document.getElementById('abrir-atualizar')?.addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('atualizar.html') });
+});

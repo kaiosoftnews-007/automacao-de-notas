@@ -49,7 +49,7 @@ async function api({ metodo = 'GET', caminho, corpo, prefer }) {
 chrome.runtime.onMessage.addListener((m, remetente, responder) => {
   (async () => {
     await fixoPronto;
-    if (m.tipo === 'atualizarAgora') { const r = await conferirAtualizacao(true); if (r?.erro) throw new Error(r.erro); return r?.msg || 'Conferindo…'; }
+    if (m.tipo === 'atualizarAgora') return abrirAtualizar();
     if (m.tipo === 'login') return auth({ email: m.email, password: m.senha }, 'password').then(s => ({ email: s.email }));
     if (m.tipo === 'sessaoDoPainel') {
       const { sessao } = await get('sessao');
@@ -382,62 +382,10 @@ function conferirZips() {
 conferirZips();
 
 
-// ================= 3.11.0: atualização automática (sem escolher pasta) =================
-// A cada minuto (e assim que o Chrome abre) confere web/data/automacao-notas.json. Se há versão nova e nenhum download está
-// rodando, baixa o zip para Downloads\Notas Sefaz\_organizar\atualizar-extensao.<id>.<versão>.zip.
-// O organizador grava os arquivos na pasta da extensão e deixa atualizacao-status.json lá;
-// quando esse arquivo confirma a versão, a extensão se recarrega. Andamento/erro vão para o painel
-// (computadores.atualizacao), na tela Atualizações.
-const DADOS_ATU = 'https://automacao-de-notas.denise-vaz1541.workers.dev/data/automacao-notas';
-const maiorVer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
-  for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
-async function lerProprio(arq) {
-  try { const r = await fetch(chrome.runtime.getURL(arq), { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
-}
-const MSG_ORG = 'Confira se o organizador está rodando e na versão nova (Atualizações → Baixar organizador → INSTALAR-ORGANIZADOR.bat).';
-
-async function conferirAtualizacao(forcar = false) {
-  const { atu = {} } = await get('atu');
-  const minha = chrome.runtime.getManifest().version;
-  if (atu.alvo) {   // já pediu ao organizador: ele gravou?
-    const st = await lerProprio('atualizacao-status.json');
-    if (st?.versao === atu.alvo && st.ok && maiorVer(atu.alvo, minha)) {
-      await set({ atu: { conferido: atu.conferido } }); chrome.runtime.reload(); return { msg: `Atualizando para ${atu.alvo}…` };
-    }
-    if (st?.versao === atu.alvo && st.ok === false) {
-      await set({ atu: { conferido: atu.conferido, erro: `${st.erro || 'falhou'}`, erroVersao: atu.alvo, em: Date.now() } });
-      return { erro: `O organizador não conseguiu atualizar: ${st.erro}` };
-    }
-    if (Date.now() - atu.desde < 10 * 60e3) return { msg: `Atualizando para ${atu.alvo}… (aguardando o organizador)` };
-    await set({ atu: { conferido: atu.conferido, erro: `o organizador não aplicou a ${atu.alvo} em 10 minutos. ${MSG_ORG}`, erroVersao: atu.alvo, em: Date.now() } });
-    if (!forcar) return;
-  }
-  if (!forcar && Date.now() - (atu.conferido || 0) < 50e3) return;
-  const r = await fetch(`${DADOS_ATU}.json`, { cache: 'no-store' });
-  if (!r.ok) throw new Error(`não consegui consultar a versão publicada (HTTP ${r.status})`);
-  const { versao } = await r.json();
-  const agora = (await get('atu')).atu || {};
-  await set({ atu: { ...agora, conferido: Date.now() } });
-  if (!/^\d+\.\d+\.\d+$/.test(versao || '') || !maiorVer(versao, minha)) {
-    if (agora.erro) await set({ atu: { conferido: Date.now() } });
-    return { msg: `Este computador já está na versão mais nova (${minha}).` };
-  }
-  // depois de um erro, só tenta a mesma versão de novo sozinho depois de 6 h (no botão, na hora)
-  if (!forcar && agora.erro && agora.erroVersao === versao && Date.now() - agora.em < 6 * 3600e3) return;
-  if (await ocupado()) return { erro: 'Há um download de notas rodando neste computador. A atualização acontece sozinha quando ele terminar.' };
-  await chrome.downloads.download({ url: `${DADOS_ATU}.zip?v=${versao}`, conflictAction: 'overwrite', saveAs: false,
-    filename: `Notas Sefaz/_organizar/atualizar-extensao.${chrome.runtime.id}.${versao}.zip` });
-  await set({ atu: { conferido: Date.now(), alvo: versao, desde: Date.now() } });
-  for (const seg of [8, 15, 25, 40]) setTimeout(() => conferirAtualizacao().catch(() => {}), seg * 1000);   // o organizador olha a pasta a cada 5 s
-  return { msg: `Baixando a ${versao}. O organizador grava e a extensão se recarrega sozinha em alguns segundos.` };
-}
-// Texto que vai para o painel (coluna Atualização em Atualizações)
-async function textoAtualizacao() {
-  const { atu = {} } = await get('atu');
-  if (atu.alvo) return `Atualizando para ${atu.alvo}…`;
-  if (atu.erro) return `Erro ao atualizar: ${atu.erro}`;
-  return null;
-}
-chrome.alarms.create('atualizacao', { periodInMinutes: 1 });
-chrome.alarms.onAlarm.addListener(a => { if (a.name === 'atualizacao') conferirAtualizacao().catch(e => console.warn('atualização:', e.message)); });
-chrome.runtime.onStartup.addListener(() => conferirAtualizacao().catch(() => {}));   // assim que o computador liga e o Chrome abre
+// ================= 3.11.3: atualização pela página atualizar.html (modelo SGD Integra) =================
+// O painel (Atualizações → "Atualizar este computador agora") e o popup abrem atualizar.html.
+// Na 1ª vez escolhe-se a pasta da extensão (fica guardada); nas próximas é só clicar em Atualizar agora.
+// (A atualização pelo organizador da 3.11.0–3.11.2 foi desligada a pedido do Kaio.)
+async function textoAtualizacao() { return null; }
+function abrirAtualizar() { return chrome.tabs.create({ url: chrome.runtime.getURL('atualizar.html') }).then(() => 'Abrindo a página de atualização da extensão…'); }
+chrome.storage.local.remove('atu'); chrome.alarms.clear('atualizacao');

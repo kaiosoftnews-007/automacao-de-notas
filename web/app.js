@@ -1006,12 +1006,12 @@ async function telaAtualizacoes() {
     <div class="sub" style="margin-top:-8px">Login dentro da extensão: ${login ? `<b>${h(login.email)}</b>` : '<b style="color:var(--err)">não configurado</b>'} · <a href="#" id="trocar-login">${login ? 'Alterar' : 'Configurar'}</a></div>
     ${(outrosAtras.length || esteAtras) ? `<div class="card" style="background:var(--warn-bg);border-color:#E9C46A;padding:14px 18px;color:var(--warn);font-size:14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
       <div style="flex:1;min-width:260px">
-        ${esteAtras ? (cmpVer(minhaExt, '3.11.0') >= 0
-          ? `<b>Este computador está na ${h(minhaExt)}; a ${h(princ.versao)} entra sozinha em até ${minhaExt === '3.11.0' ? '30 minutos' : '1 minuto'}</b> (se não estiver baixando notas). Para não esperar, clique ao lado.`
-          : `<b>Este computador está na ${h(minhaExt)}, que ainda não se atualiza sozinha.</b> Baixe a ${h(princ.versao)} aqui e substitua os arquivos uma última vez.`) : ''}
-        ${outrosAtras.length ? `${esteAtras ? '<br>' : ''}<b>${outrosAtras.map(p => `${h(p.nome)} (${h(p.versao || 'sem versão')})`).join(', ')} ${outrosAtras.length > 1 ? 'ainda não atualizaram' : 'ainda não atualizou'}.</b> Atualiza${outrosAtras.length > 1 ? 'm' : ''} sozinho${outrosAtras.length > 1 ? 's' : ''} quando estiver${outrosAtras.length > 1 ? 'em' : ''} ligado${outrosAtras.length > 1 ? 's' : ''} com o Chrome aberto.` : ''}
+        ${esteAtras ? (cmpVer(minhaExt, '3.11.3') >= 0
+          ? `<b>Este computador está na ${h(minhaExt)}; há a ${h(princ.versao)}.</b> Clique em Atualizar: abre a página da extensão; na primeira vez escolha a pasta da extensão, nas próximas é só clicar em <b>Atualizar agora</b>.`
+          : `<b>Este computador está na ${h(minhaExt)}, que não tem o botão de atualizar.</b> Baixe a ${h(princ.versao)} aqui e substitua os arquivos uma última vez.`) : ''}
+        ${outrosAtras.length ? `${esteAtras ? '<br>' : ''}<b>${outrosAtras.map(p => `${h(p.nome)} (${h(p.versao || 'sem versão')})`).join(', ')} ${outrosAtras.length > 1 ? 'ainda não atualizaram' : 'ainda não atualizou'}.</b> Atualize por esta tela (ou pelo ícone da extensão) em cada um deles.` : ''}
       </div>
-      ${esteAtras && cmpVer(minhaExt, '3.11.0') >= 0 ? '<button type="button" class="btn p" style="padding:0 18px" id="atualizar-este">Atualizar este computador agora</button>' : ''}
+      ${esteAtras && cmpVer(minhaExt, '3.11.3') >= 0 ? '<button type="button" class="btn p" style="padding:0 18px" id="atualizar-este">Atualizar este computador</button>' : ''}
     </div>` : ''}
     <div class="cols">
       <section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Computadores com a extensão</h2><div class="sub" style="margin-top:4px">Versão que cada computador informou no último sinal. Ao remover a extensão do Chrome (3.8.1 ou mais nova), ele sai daqui sozinho.</div></div>
@@ -1027,12 +1027,12 @@ async function telaAtualizacoes() {
           <li>Baixe o zip e extraia numa pasta fixa.<div class="mono" style="margin:6px 0">Documentos\\extensao-sefaz</div></li>
           <li>Abra <b>chrome://extensions</b> e ligue o <b>Modo do desenvolvedor</b>.</li>
           <li><b>Primeira vez:</b> Carregar sem compactação → escolha a pasta.</li>
-          <li><b>Atualizar:</b> automático (3.11.0 ou mais nova). Cada computador confere a cada minuto e se atualiza sozinho quando não está baixando notas; o <b>organizador</b> (abaixo) precisa estar instalado. Versões antigas: substitua os arquivos da pasta e clique em <b>recarregar</b> (↻).</li>
+          <li><b>Atualizar (3.11.3 ou mais nova):</b> botão <b>Atualizar este computador</b> nesta tela (ou <b>Atualizar a extensão</b> no ícone dela). Na primeira vez, escolha a pasta da extensão; nas próximas é só clicar em <b>Atualizar agora</b>. Versões antigas: substitua os arquivos da pasta e clique em <b>recarregar</b> (↻).</li>
           <li>No ícone da extensão, dê um nome ao computador (ex.: PC-CASA).</li></ol></section>
     </div>
     <section class="card pad" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
       <div style="width:52px;height:52px;border-radius:10px;background:#E8EDF4;display:flex;align-items:center;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1F3864" stroke-width="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
-      <div style="flex:1;min-width:260px"><h2>Organizador de pastas</h2><div class="sub" style="margin-top:4px">Move os ZIPs da pasta Downloads para a pasta de cada empresa. Instale em cada computador que baixa notas: extraia e rode <b>INSTALAR-ORGANIZADOR.bat</b>. Ele também aplica as <b>atualizações automáticas</b> da extensão (reinstale uma vez se o computador tem o organizador de antes de 16/11/2026).</div></div>
+      <div style="flex:1;min-width:260px"><h2>Organizador de pastas</h2><div class="sub" style="margin-top:4px">Move os ZIPs da pasta Downloads para a pasta de cada empresa. Instale em cada computador que baixa notas: extraia e rode <b>INSTALAR-ORGANIZADOR.bat</b>. Não precisa baixar de novo quando a extensão atualizar.</div></div>
       <button type="button" class="btn o" style="padding:0 18px" id="baixar-org">Baixar organizador (.zip)</button>
     </section>
     <section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Histórico de versões</h2><div class="sub" style="margin-top:4px">A versão principal não pode ser excluída; torne outra principal antes.</div></div>
@@ -1044,13 +1044,13 @@ async function telaAtualizacoes() {
   $('#trocar-login').onclick = async e => { e.preventDefault(); if (await pedirLoginExtensao(login?.email)) { toast('Login da extensão salvo.'); telaAtualizacoes(); } };
   const btAtu = $('#atualizar-este');
   if (btAtu) btAtu.onclick = () => {
-    btAtu.disabled = true; btAtu.textContent = 'Atualizando…';
+    btAtu.disabled = true; btAtu.textContent = 'Abrindo…';
     const ouvir = e => {
       if (e.source !== window || e.data?.tipo !== 'automacao-notas:atualizar-resposta') return;
       window.removeEventListener('message', ouvir);
       toast(e.data.erro ? 'Não foi possível atualizar: ' + e.data.erro : e.data.msg);
-      if (e.data.erro) { btAtu.disabled = false; btAtu.textContent = 'Atualizar este computador agora'; }
-      else setTimeout(() => location.hash === '#/atualizacoes' && telaAtualizacoes(), 45e3);   // a extensão se recarrega e manda a versão nova no sinal
+      if (e.data.erro) { btAtu.disabled = false; btAtu.textContent = 'Atualizar este computador'; }
+      else { btAtu.disabled = false; btAtu.textContent = 'Atualizar este computador'; }
     };
     window.addEventListener('message', ouvir);
     window.postMessage({ tipo: 'automacao-notas:atualizar' }, location.origin);
