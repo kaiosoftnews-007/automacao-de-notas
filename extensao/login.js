@@ -64,6 +64,39 @@
     await msg({ tipo: 'irPara', url });       // o background troca o endereço da aba (funciona até de dentro de quadros)
   }
 
+  // 3.12.0: a Sefaz recusou o CPF/senha do contador da vez. Não insiste (para não bloquear a credencial):
+  // marca as empresas desse contador com erro e segue com o próximo contador da fila.
+  async function pularContador(escId) {
+    const { exec, contadorAtual: ca } = await get(['exec', 'contadorAtual']);
+    if (!exec?.rodando || exec.escritorio?.id !== escId || !ca?.id || ca.escritorio_id !== escId) return false;
+    const motivo = 'A Sefaz recusou o CPF e a senha do contador desta empresa. Confira em Acesso à Sefaz no painel.';
+    for (const i of exec.fila.filter(i => (i.contador_id || null) === ca.id && ['pendente', 'consultando'].includes(i.etapa))) {
+      i.etapa = 'erro'; i.msg = motivo;
+      const corpo = { status: 'erro', mensagem: motivo };
+      if (i.dl) await msg({ tipo: 'api', metodo: 'PATCH', caminho: `downloads?id=eq.${i.dl}`, corpo: { ...corpo, atualizado_em: new Date().toISOString() } });
+      else await msg({ tipo: 'api', metodo: 'POST', caminho: 'downloads', corpo: { empresa_id: i.empresa_id, escritorio_id: escId, execucao_id: exec.execucao_id || null, competencia: exec.comp, tipo: i.tipo, ...corpo } });
+    }
+    msg({ tipo: 'api', metodo: 'POST', caminho: 'rpc/extensao_contador_recusado', corpo: { p_contador: ca.id } });
+    const prox = exec.fila.find(i => i.etapa === 'pendente');
+    if (!prox) {
+      const n = e => exec.fila.filter(i => i.etapa === e).length;
+      exec.rodando = false;
+      exec.msg = `Terminou: ${n('baixado')} baixados, ${n('sem_notas')} sem notas, ${n('erro')} com erro.`;
+      if (exec.execucao_id) await msg({ tipo: 'api', metodo: 'PATCH', caminho: `execucoes?id=eq.${exec.execucao_id}`,
+        corpo: { status: n('erro') < exec.fila.length ? 'com_erros' : 'falhou', finalizada_em: new Date().toISOString() } });
+      await set({ exec: { ...exec, atualizado: Date.now() }, pedido: null });
+      faixa('a Sefaz recusou o CPF e a senha de um contador. ' + exec.msg);
+      avisar('A Sefaz recusou o CPF e a senha de um contador (as empresas dele ficaram com erro). ' + exec.msg);
+      return true;
+    }
+    await set({ exec: { ...exec, atualizado: Date.now() }, contadorAtual: { escritorio_id: escId, id: prox.contador_id || null },
+      sessaoSefaz: null, login: {}, captcha: {} });
+    avisar('A Sefaz recusou o CPF e a senha de um contador: as empresas dele ficaram com erro. Seguindo com o próximo contador.');
+    faixa('a Sefaz recusou este contador; entrando com o próximo...');
+    await dorme(1500); location.reload();
+    return true;
+  }
+
   await dorme(800);
   const esc = await ativo();
   if (!esc) return;
@@ -97,7 +130,7 @@
     let c = r?.ok;
     if (!c?.senha) c = ((await get('credSefaz')).credSefaz || {})[esc];   // reserva: senha salva no ícone da extensão
     if (!c?.senha) {
-      faixa('não achei o login da Sefaz deste escritório. Cadastre em "Acesso à Sefaz" no painel.');
+      faixa('não achei o login da Sefaz deste escritório (ou do contador da empresa). Cadastre em "Acesso à Sefaz" no painel.');
       return avisar('Login da Sefaz não encontrado: cadastre em Acesso à Sefaz no painel.' + (r?.erro ? ' (' + r.erro + ')' : ''));
     }
     if (!(await conta('login', 6))) {
@@ -150,6 +183,8 @@
       await msg({ tipo: 'focar' });
       return avisar('A Sefaz pediu a verificação humana. Abri a aba: faça a verificação e clique em Autenticar.');
     };
+    // 3.12.0: anota com qual CPF a Sefaz ficou logada (o content.js troca de contador entre as empresas).
+    const entrou = () => set({ sessaoSefaz: { cpf: c.cpf, escritorio_id: esc, em: Date.now() } });
     const recusou = () => /(senha|credenciais?)[^.\n]{0,40}(inv[aá]lid|incorret|n[aã]o confere)|bloquead/i.test(texto());
 
     // Voltou da tentativa anterior com "erro na validação do Captcha" (quase sempre porque o CPF tinha sumido):
@@ -162,18 +197,19 @@
     await dorme(1200);                                            // primeiro acesso: a tela ainda está montando os campos
     for (let tentativa = 1; tentativa <= 3; tentativa++) {
       faixa(tentativa === 1 ? 'entrando na Sefaz...' : `entrando na Sefaz (tentativa ${tentativa})...`);
-      if (!campoSenha()) return;                                  // saiu da tela de login: deu certo
+      if (!campoSenha()) return entrou();                         // saiu da tela de login: deu certo
       if (!(await preencher())) { faixa('o CPF não fica no campo; tentando de novo...'); continue; }
       const botao = [...document.querySelectorAll('button,input[type=submit],input[type=button],a')]
         .find(b => visivel(b) && /autenticar|entrar/i.test(b.innerText || b.value || ''));
       if (!camposOk()) continue;                                  // conferência final, logo antes do clique
       if (botao) await clicar(botao); else campoSenha()?.form?.requestSubmit?.();
       await dorme(5000);
-      if (!campoSenha()) return;                                  // entrou
+      if (!campoSenha()) return entrou();                         // entrou
       if (captcha()) return;                                      // a página recarrega e esta rotina recomeça lá em cima
       if (recusou()) break;                                       // senha errada de verdade: não insiste
     }
     if (recusou()) {
+      if (await pularContador(esc)) return;                       // 3.12.0: segue com o próximo contador
       faixa('a Sefaz não aceitou o CPF e a senha. Confira em "Acesso à Sefaz" no painel.');
       await set({ pedido: null });
       return avisar('A Sefaz recusou o login cadastrado no painel (Acesso à Sefaz).');

@@ -100,7 +100,11 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
       return true;
     }
     if (m.tipo === 'credSefaz') {
-      const r = await api({ metodo: 'POST', caminho: 'rpc/extensao_obter_credencial', corpo: { p_escritorio: m.escritorio_id } });
+      // 3.12.0: login do contador da empresa (contador_id); sem contador, o login do escritório.
+      // Sem contador_id na mensagem: usa o contador da vez (gravado pelo content.js / executar).
+      let cont = m.contador_id;
+      if (cont === undefined) { const { contadorAtual: ca } = await get('contadorAtual'); cont = ca?.escritorio_id === m.escritorio_id ? ca.id : null; }
+      const r = await api({ metodo: 'POST', caminho: 'rpc/extensao_obter_credencial', corpo: { p_escritorio: m.escritorio_id, p_contador: cont || null } });
       return r?.[0] ? { cpf: String(r[0].cpf).replace(/\D/g, ''), senha: r[0].senha } : null;
     }
     if (m.tipo === 'preencherLogin') {
@@ -248,8 +252,22 @@ async function executar(m) {
   }
   const [esc] = await api({ caminho: `escritorios?select=id,nome&id=eq.${m.escritorio_id}` });
   if (!esc) throw new Error('este login da extensão não enxerga o escritório. Entre na extensão com o mesmo login do painel.');
-  await set({ escritorio: esc });
+  await set({ escritorio: esc, contadorAtual: { escritorio_id: m.escritorio_id, id: await primeiroContador(m) } });
   return true;
+}
+
+// 3.12.0: contadores por empresa. A fila do content.js vai na ordem do contador (FILA_ORDEM); o primeiro
+// login na Sefaz já é o do contador da primeira empresa da fila.
+async function primeiroContador(m) {
+  try {
+    const ies = String(m.ie || '').split(/[,;\s]+/).map(x => x.replace(/\D/g, '')).filter(Boolean);
+    const filtroIe = ies.length ? `&ie=in.(${ies.join(',')})` : '';
+    const emps = await api({ caminho: `empresas?select=contador_id&escritorio_id=eq.${m.escritorio_id}&ativa=eq.true&ie=not.is.null&ie=neq.&order=contador_id.asc.nullsfirst,razao_social.asc${filtroIe}` }) || [];
+    // Prefere o primeiro contador que já tem CPF e senha no painel (os sem login viram erro na fila, sem entrar na Sefaz).
+    const comLogin = new Set((await api({ caminho: `contadores?select=id&escritorio_id=eq.${m.escritorio_id}&cpf=not.is.null&senha_secret_id=not.is.null` }) || []).map(c => c.id));
+    const e = emps.find(x => !x.contador_id || comLogin.has(x.contador_id)) || emps[0];
+    return e?.contador_id || null;
+  } catch (_) { return null; }
 }
 
 async function cadastrarPc(nome) {

@@ -89,6 +89,7 @@ automacao-de-notas/
 | Aviso "Confirme que é humano" | `content.js` → `esperarVerificacao` + `background.js` (`verificacao`) |
 | Nome do ZIP com o destino | `content.js` → `historico` (variável `guia`) |
 | Registra no painel | `content.js` → `banco`, `execucao` |
+| Contador de cada empresa (login certo, troca entre contadores) | `content.js` → `contadorCerto`; `background.js` → `credSefaz`, `primeiroContador`; `login.js` → `pularContador` |
 | Tempos (espera, pausas, tentativas) | `content.js`, linha `const ESPERA_VERIFICACAO … MAX_HIST` |
 
 ### Organizador — `organizador/organizar.ps1`
@@ -107,6 +108,7 @@ automacao-de-notas/
 | `0003` / `0004` | Deixa a extensão registrar downloads e atualizar a execução |
 | `0005_extensao_le_login_sefaz.sql` | Função que entrega o login da Sefaz à extensão (só do escritório do usuário) |
 | `0006_pasta_da_empresa.sql` | Campo `pasta` (pasta mãe da empresa) |
+| `0031_contadores_por_empresa.sql` | Contadores por empresa (`contadores`, `empresas.contador_id`, senha no Vault) + cadastro do escritório RM CONTABILIDADE |
 
 Mudança no banco = novo arquivo `0007_….sql` aqui **e** rodar no SQL Editor do Supabase.
 

@@ -1,5 +1,6 @@
 [
-  "Volta a atualização pela página da extensão (modelo SGD Integra): na 1ª vez escolhe a pasta, nas próximas só clica em Atualizar agora",
-  "Não precisa do organizador para atualizar a extensão",
-  "Se a escolha da pasta falhar, a página mostra o motivo exato"
+  "Contadores por empresa: cada empresa baixa com o CPF e a senha da Sefaz do seu contador",
+  "A fila vai na ordem do contador: entra uma vez na Sefaz por contador e troca sozinha para o próximo",
+  "Se a Sefaz recusar a senha de um contador, as empresas dele ficam com erro e a fila segue com os outros",
+  "Empresas sem contador continuam usando o login do escritório, como antes"
 ]

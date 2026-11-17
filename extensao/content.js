@@ -107,7 +107,10 @@
       const ies = String($('#an-ie', caixa).value || '').split(/[,;\s]+/).map(so).filter(Boolean);
       const ie = ies.join(', ');
       const filtroIe = ies.length > 1 ? `&ie=in.(${ies.join(',')})` : ies.length ? `&ie=eq.${ies[0]}` : '';
-      const emps = await bg({ tipo: 'api', caminho: `empresas?select=*&escritorio_id=eq.${escritorio.id}&ativa=eq.true&ie=not.is.null&order=razao_social${filtroIe}` });
+      // 3.12.0: na ordem do contador (um login na Sefaz por contador); sem a coluna contador_id (banco antigo), como antes.
+      const base = `escritorio_id=eq.${escritorio.id}&ativa=eq.true&ie=not.is.null${filtroIe}`;
+      const emps = await bg({ tipo: 'api', caminho: `empresas?select=*,contadores(nome)&${base}&order=contador_id.asc.nullsfirst,razao_social.asc` })
+        .catch(() => bg({ tipo: 'api', caminho: `empresas?select=*&${base}&order=razao_social` }));
       const rot = (await bg({ tipo: 'api', caminho: `rotinas?select=periodo,pasta_destino&escritorio_id=eq.${escritorio.id}` }))[0];
       const h = new Date(), atual = rot?.periodo === 'mes_atual';
       let ini = new Date(h.getFullYear(), h.getMonth() - (atual ? 0 : 1), 1);
@@ -123,7 +126,7 @@
       for (const e of emps) for (const tipo of ['entrada', 'saida']) {
         if (!e[`baixar_${tipo}`] || !so(e.ie)) continue;
         fila.push({ empresa_id: e.id, ie: so(e.ie), nome: e.razao_social,
-          codigo: e.codigo || '',
+          codigo: e.codigo || '', contador_id: e.contador_id || null, contador: e.contadores?.nome || '',
           mae: (e.pasta || rot?.pasta_destino || 'C:\\Notas').replace(/[\\/]+$/, ''),   // pasta mãe: do cadastro da empresa ou da Rotina
           tipo, modelo: e.modelo, canceladas: e.exibir_canceladas, eventos: e.incluir_eventos, etapa: 'pendente' });
       }
@@ -330,13 +333,22 @@
   }
 
   // Nunca consulta com o login de outro contador (o login.js anota qual CPF está logado na Sefaz).
-  async function contadorCerto() {
+  // 3.12.0: o contador certo é o da empresa da vez (contador_id); sem contador, o do escritório.
+  async function contadorCerto(item) {
+    const cont = item.contador_id || null;
+    await chrome.storage.local.set({ contadorAtual: { escritorio_id: st.escritorio.id, id: cont } });
+    let certo = null, falhou = false;
+    try { certo = (await bg({ tipo: 'credSefaz', escritorio_id: st.escritorio.id, contador_id: cont }))?.cpf; } catch (_) { falhou = true; }
+    if (cont && !certo && !falhou) {             // contador sem CPF/senha no painel: pula as empresas dele
+      const msg = `Falta cadastrar o CPF e a senha da Sefaz do contador ${item.contador || ''} (Acesso à Sefaz no painel).`;
+      for (const i of st.fila.filter(i => (i.contador_id || null) === cont && ['pendente', 'consultando'].includes(i.etapa))) {
+        i.etapa = 'erro'; i.msg = msg; await banco(i, { status: 'erro', mensagem: msg });
+      }
+      await irForm(); return false;
+    }
     const { sessaoSefaz } = await chrome.storage.local.get('sessaoSefaz');
-    if (!sessaoSefaz?.cpf) return true;
-    let certo = null;
-    try { certo = (await bg({ tipo: 'credSefaz', escritorio_id: st.escritorio.id }))?.cpf; } catch (_) {}
-    if (!certo || sessaoSefaz.cpf === certo) return true;
-    dizer('A Sefaz está com o login de outro contador. Saindo para entrar com o contador deste escritório...');
+    if (!sessaoSefaz?.cpf || !certo || sessaoSefaz.cpf === certo) return true;
+    dizer(item.contador ? `Trocando o login da Sefaz para o contador ${item.contador}...` : 'A Sefaz está com o login de outro contador. Saindo para entrar com o contador deste escritório...');
     await gravar(st); bg({ tipo: 'trocarContador' }).catch(() => {});
     return false;
   }
@@ -369,7 +381,7 @@
         return await irForm();
       }
       st.voltas = 0;
-      if (!(await contadorCerto())) return;
+      if (!(await contadorCerto(item))) return;
       try { await preencherEPesquisar(item); } catch (e) { await falhar(item, e.message); }
     } catch (e) { dizer('Erro: ' + e.message); }
     finally { ocupado = false; if (st) gravar(st); }
