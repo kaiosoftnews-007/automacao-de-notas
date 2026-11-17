@@ -26,6 +26,16 @@ drop policy if exists cont_excluir on public.contadores;
 create policy cont_excluir on public.contadores for delete to authenticated using (public.pode_ver(escritorio_id));
 -- inclusão e alteração só pela função salvar_contador (a senha vai para o Vault)
 
+-- Apaga a senha do Vault ao excluir (mesma função da 0002; recriada aqui porque não existe em produção).
+create or replace function public.apagar_senha_vault() returns trigger
+language plpgsql security definer set search_path = public, vault as $$
+begin
+  if old.senha_secret_id is not null then
+    delete from vault.secrets where id = old.senha_secret_id;
+  end if;
+  return old;
+end $$;
+
 drop trigger if exists ao_excluir_contador on public.contadores;
 create trigger ao_excluir_contador after delete on public.contadores
   for each row execute function public.apagar_senha_vault();
