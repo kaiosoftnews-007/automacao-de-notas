@@ -1250,14 +1250,14 @@ async function telaAcesso(params) {
       </form>` : ''}
     </div>
     ${conts ? `<div class="cols form" id="contadores">
-      <section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Contadores do escritório</h2><div class="sub" style="margin-top:4px">Cada empresa baixa com o login do seu contador (escolhido no cadastro da empresa). Empresas sem contador usam o login do escritório, acima.</div></div>
+      <section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Contadores do escritório ${h(es.nome)}</h2><div class="sub" style="margin-top:4px">Cada empresa baixa com o login do seu contador (escolhido no cadastro da empresa). Empresas sem contador usam o login do escritório, acima.</div></div>
         ${conts.length ? `<table class="tbl"><thead><tr><th>Contador</th><th>CPF</th><th class="c">Empresas</th><th>Situação</th><th>Último teste</th><th></th></tr></thead><tbody>
         ${conts.map(x => `<tr class="click ${ct?.id === x.id ? 'sel-row' : ''}" data-href="${qsCont(x.id)}"><td style="font-weight:600">${h(x.nome)}</td><td>${x.cpf ? mascCpf(x.cpf) : '—'}</td><td class="c">${nEmp[x.id] || 0}</td>
           <td>${pillContador(x)}</td><td>${quando(x.ultimo_teste)}</td><td style="text-align:right"><a class="btn s lk" href="${qsCont(x.id)}">Editar</a></td></tr>`).join('')}
         </tbody></table>` : '<div class="empty">Nenhum contador ainda. Só precisa se cada empresa usar o login de um contador diferente.</div>'}
         <div class="pad" style="padding-top:12px"><a class="btn o s lk" href="${qsCont('novo')}">+ Novo contador</a></div></section>
       ${ct ? `<form class="card pad" id="fc" style="display:flex;flex-direction:column;gap:12px">
-        <div><div class="sub" style="text-transform:uppercase;letter-spacing:.06em;font-weight:600">${ct.id ? 'Editando contador' : 'Novo contador'}</div><h2 style="font-size:18px;margin-top:4px">${h(ct.nome || es.nome)}</h2></div>
+        <div><div class="sub" style="text-transform:uppercase;letter-spacing:.06em;font-weight:600">${ct.id ? 'Editando contador' : 'Novo contador'} · ${h(es.nome)}</div><h2 style="font-size:18px;margin-top:4px">${ct.id ? h(ct.nome) : 'Cadastrar contador'}</h2></div>
         ${ct.situacao === 'recusada' ? `<div class="msg err">A Sefaz recusou a senha ${quando(ct.ultimo_teste)}. Se ela mudou, atualize aqui.</div>` : ''}
         <label class="f">Nome<input name="nome" required value="${h(ct.nome)}"></label>
         <label class="f">CPF<input name="cpf" required inputmode="numeric" value="${h(ct.cpf)}" placeholder="000.000.000-00"></label>
