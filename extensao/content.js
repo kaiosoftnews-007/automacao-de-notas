@@ -286,7 +286,8 @@
       if (/erro|falh|expirad/i.test(tr.innerText)) { item.etapa = 'erro'; item.msg = 'A Sefaz não gerou o arquivo: ' + tr.innerText.replace(/\s+/g, ' ').slice(0, 100); await banco(item, { status: 'erro', mensagem: item.msg }); continue; }
       const mmaaaa = st.comp.slice(5, 7) + st.comp.slice(0, 4);   // ex.: 102026
       const tipoNome = item.tipo === 'entrada' ? 'Entrada' : 'Saida';
-      const nomeArq = `${mmaaaa}\\${tipoNome}_${mmaaaa}.zip`;
+      // 3.12.1: dentro da pasta da empresa, sempre na subpasta NOTAS (usa a que existir, notas/NOTAS; se não tiver, o organizador cria).
+      const nomeArq = `NOTAS\\${mmaaaa}\\${tipoNome}_${mmaaaa}.zip`;
       const final = `${item.mae}\\${limpo(item.codigo ? `${item.codigo} - ${item.nome}` : item.nome)}\\${nomeArq}`;
       // O Chrome só salva em Downloads: o destino vai escrito no próprio nome do ZIP, e o organizador do
       // Windows move para a pasta da empresa (sem pasta no cadastro, acha ou cria a pasta dentro da pasta mãe).

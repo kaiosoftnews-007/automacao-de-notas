@@ -1,6 +1,3 @@
 [
-  "Contadores por empresa: cada empresa baixa com o CPF e a senha da Sefaz do seu contador",
-  "A fila vai na ordem do contador: entra uma vez na Sefaz por contador e troca sozinha para o próximo",
-  "Se a Sefaz recusar a senha de um contador, as empresas dele ficam com erro e a fila segue com os outros",
-  "Empresas sem contador continuam usando o login do escritório, como antes"
+  "As notas agora são salvas dentro da pasta NOTAS da empresa (ex.: EMPRESA\\NOTAS\\112026\\Entrada_112026.zip); se a pasta NOTAS não existir, ela é criada"
 ]
