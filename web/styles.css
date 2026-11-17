@@ -159,3 +159,24 @@ html[data-tema=escuro] .msg.ok,html[data-tema=escuro] .vivo,html[data-tema=escur
 html[data-tema=escuro] .na{background:#28364A;color:#B4BFCF}
 html[data-tema=escuro] .toast{background:#E7ECF4;color:#172033}
 html[data-tema=escuro] .login{background:#0E1622}
+/* ===== cards de número (16/11/2026): ícone, cor, barrinha, contagem e clique ===== */
+.kpi{overflow:hidden;transition:border-color .15s,transform .15s,box-shadow .15s}
+.kpi.mini{padding:14px}.kpi.mini .v{font-size:20px;margin-top:4px}.kpi.mini .tr{font-size:12px;font-weight:500;color:var(--muted);margin-top:2px}.kpi.mini .kic{width:28px;height:28px;right:12px;top:12px}
+button.kpi{appearance:none}
+.kpi.clic{cursor:pointer;text-decoration:none;display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch;text-align:left}.kpi .kbar{margin-top:auto}.kpi .tr{margin-bottom:10px}.kpi.clic:hover{transform:translateY(-3px);box-shadow:0 10px 22px rgba(20,39,68,.12);border-color:var(--kc)}
+.kpi.clic:active{transform:translateY(-1px)}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc);opacity:.9}
+.kic{position:absolute;right:16px;top:16px;width:36px;height:36px;border-radius:10px;background:var(--kb);color:var(--kc);display:flex;align-items:center;justify-content:center;transition:transform .2s}
+.kpi.clic:hover .kic{transform:scale(1.1) rotate(-4deg)}
+.kpi .l{padding-right:44px}.kpi .tr{max-width:none}.kpi:has(.ring) .tr{max-width:calc(100% - 64px)}.kpi:has(.ring) .kic{display:none}
+.kgo{position:absolute;right:16px;bottom:12px;font-weight:700;color:var(--kc);opacity:0;transform:translateX(-6px);transition:opacity .15s,transform .15s}
+.kpi.clic:hover .kgo{opacity:1;transform:none}.kpi:has(.ring) .kgo{display:none}
+.kbar{height:6px;flex:none;border-radius:999px;background:var(--line);overflow:hidden;margin-top:10px;display:flex}.kbar span{display:block;height:100%;background:var(--kc);border-radius:999px;animation:cresce .6s ease-out}
+.kbar.duo span{border-radius:0}.duo .le{background:#2F6FD0}.duo .ls{background:#B8901F}
+.duo i{display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 4px 0 0}.duo i.ls{margin-left:10px}
+@keyframes cresce{from{width:0}}
+.ring .arco{animation:arco .7s ease-out}@keyframes arco{from{stroke-dasharray:0 139}}
+.k-az{--kc:#2F6FD0;--kb:#E6EEFB}.k-vd{--kc:#17804A;--kb:#E3F3EA}.k-am{--kc:#B8901F;--kb:#FBF1D3}.k-vm{--kc:#B3261E;--kb:#FBE4E1}.k-cz{--kc:#93A0B4;--kb:var(--line2)}
+.kpi.k-vm .v{color:var(--err-t)}.kpi.k-cz .v{color:var(--muted)}
+.kpi.on{outline:2px solid var(--kc);outline-offset:-1px;background:var(--kb)}.kpi.on .kic{background:var(--card)}
+html[data-tema=escuro] .k-az{--kc:#7FA9F0;--kb:#1C2C45}html[data-tema=escuro] .k-vd{--kc:#5FC592;--kb:#16382A}html[data-tema=escuro] .k-am{--kc:#E2B33C;--kb:#3A3320}html[data-tema=escuro] .k-vm{--kc:#F08A80;--kb:#4A1F1C}

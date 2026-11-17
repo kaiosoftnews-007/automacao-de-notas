@@ -236,7 +236,7 @@ async function layout(vez, ativo, conteudo) {
     document.documentElement.dataset.tema = t; gravarLocal('automacao-tema', t); $('#tema').textContent = t === 'escuro' ? '☀' : '☾';
   };
   if ($('#vivo')) $('#vivo').onclick = () => atualizarSozinho(true);
-  ligarOrdenacao();
+  ligarOrdenacao(); animarNumeros();
   return true;
 }
 
@@ -248,7 +248,8 @@ async function atualizarSozinho(forcar = false) {
   const foco = document.activeElement?.tagName;
   if (!forcar && (document.hidden || document.querySelector('.modal-fundo') || ['INPUT', 'SELECT', 'TEXTAREA'].includes(foco) || root.querySelector('details[open]'))) return;
   limparCache(); carregarMenu(true);
-  try { await st.reexibir(); } catch (e) { if (e !== CANCELADA) console.error(e); }
+  st.quieto = !forcar;
+  try { await st.reexibir(); } catch (e) { if (e !== CANCELADA) console.error(e); } finally { st.quieto = false; }
 }
 setInterval(atualizarSozinho, 30000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - (st.menuEm || 0) > 30000) atualizarSozinho(); });
@@ -601,6 +602,26 @@ async function pedirExecucao(escritorioId, ie = null) {
 const CHAVE_DL = { Erro: 'erro', 'Na fila': 'fila', 'Não baixado': 'nao', 'Atenção': 'atencao', OK: 'ok' };
 const chaveDl = (b, e) => CHAVE_DL[statusDownload(b, e)[1]] || 'fora';   // fora = sem IE ou desligado
 const emDiaEmp = (b, e) => OBRIG.every(([k]) => !['pendente', 'atrasado'].includes(statusEnt(b, e, k)));
+// Card de número: ícone, valor (com contagem animada), linha de apoio e barrinha de progresso.
+// cor: az (azul), vd (verde), am (amarelo), vm (vermelho), cz (cinza). Com href ou attrs vira clicável.
+const KIC = { baixar: 'M12 3v12M7 10l5 5 5-5M4 21h16', notas: 'M14 3H6v18h12V7zM14 3v4h4M9 13h6M9 17h6', ok: 'M5 12l4 4 10-10', erro: 'M12 3l9 16H3zM12 10v4M12 17h.01',
+  emp: 'M4 21V5h10v16M14 9h6v12M8 9h2M8 13h2M8 17h2', entra: 'M12 4v14M6 12l6 6 6-6', sai: 'M12 20V6M6 12l6-6 6 6', sino: 'M6 16V11a6 6 0 0112 0v5l2 2H4zM10 21h4', troca: 'M4 8h14l-3-3M20 16H6l3 3', vazio: 'M5 12h14' };
+const num = v => `<span class="num" data-n="${+v || 0}">${n(v)}</span>`;
+function kpi({ ico, cor = 'az', l, v, de = '', sub = '', pct = null, href = '', attrs = '', on = false, d = '', extra = '', mini = false }) {
+  const tag = href ? 'a' : attrs ? 'button' : 'div';
+  return `<${tag} ${href ? `href="${href}"` : ''} ${tag === 'button' ? 'type="button"' : ''} ${attrs} class="card kpi k-${cor} ${mini ? 'mini' : 'pad'} ${tag !== 'div' ? 'clic' : ''} ${on ? 'on' : ''}">
+    <i class="kic">${ic(KIC[ico])}</i><div class="l">${l}${d ? dica(d) : ''}</div><div class="v">${num(v)}${de !== '' ? `<small> ${de}</small>` : ''}</div>
+    ${sub ? `<div class="tr">${sub}</div>` : ''}${extra}${pct != null ? `<div class="kbar"><span style="width:${Math.max(0, Math.min(100, pct))}%"></span></div>` : ''}${tag !== 'div' ? '<b class="kgo" aria-hidden="true">→</b>' : ''}</${tag}>`;
+}
+// Os números sobem do zero ao abrir a tela (não na atualização automática, para não distrair).
+function animarNumeros() {
+  if (st.quieto || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const els = $$('.num[data-n]').filter(e => +e.dataset.n > 0), t0 = performance.now(), dur = 450;
+  const passo = t => { const k = Math.min(1, (t - t0) / dur), f = 1 - Math.pow(1 - k, 3);
+    for (const e of els) e.textContent = n(Math.round(+e.dataset.n * f));
+    if (k < 1) requestAnimationFrame(passo); };
+  if (els.length) requestAnimationFrame(passo);
+}
 const dica = t => `<span class="q" tabindex="0" data-dica="${h(t)}">?</span>`;
 async function telaPainel() {
   const vez = ++st.vez;
@@ -639,11 +660,14 @@ async function telaPainel() {
       </div>
     </div>
     <section class="kpis">
-      <a class="card pad kpi clic" href="#/entregas?mostrar=falta" title="Ver as empresas que ainda faltam baixar"><div class="l">Downloads concluídos${dica('Empresas com entrada e saída já baixadas nesta competência. "Sem movimento" conta como concluído. Só entram empresas com IE e download ligado.')}</div><div class="v">${T.ok}<small> de ${T.base}</small></div><div class="tr ok-t">${pct(T.ok, T.base)}% · ${T.base - T.ok ? `ver as ${T.base - T.ok} que faltam →` : 'tudo baixado'}</div>
-        <svg class="ring" width="54" height="54" aria-hidden="true"><circle cx="27" cy="27" r="22" fill="none" stroke="var(--line)" stroke-width="7"/><circle cx="27" cy="27" r="22" fill="none" stroke="var(--ok)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${arco.toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 27 27)"/></svg></a>
-      <div class="card pad kpi"><div class="l">Notas baixadas</div><div class="v">${n(totE + totS)}</div><div class="sub">${n(totE)} entrada · ${n(totS)} saída</div><div class="sub">${b.escritorios.length} ${b.escritorios.length === 1 ? 'escritório' : 'escritórios'} · ${b.empresas.length} empresas ativas</div></div>
-      <a class="card pad kpi clic" href="#/entregas?mostrar=pendencia" title="Ver as empresas com entrega pendente"><div class="l">Entregas em dia${dica('Empresas sem nenhuma obrigação pendente ou atrasada nesta competência.')}</div><div class="v">${T.emDia}<small> de ${b.empresas.length}</small></div><div class="tr">${b.empresas.length - T.emDia ? `${b.empresas.length - T.emDia} com pendência → ver quais` : 'tudo em dia'}</div></a>
-      <a class="card pad kpi clic ${T.erro ? 'bad' : ''}" href="#/entregas?mostrar=erro" title="Ver as empresas com erro no download"><div class="l">Empresas com erro</div><div class="v">${T.erro}</div><div class="tr">${T.erro ? 'ver quais →' : 'nenhum erro'}</div></a>
+      ${kpi({ ico: 'baixar', cor: T.base && T.ok === T.base ? 'vd' : 'az', l: 'Downloads concluídos', v: T.ok, de: 'de ' + T.base, href: '#/entregas?mostrar=falta', d: 'Empresas com entrada e saída já baixadas nesta competência. "Sem movimento" conta como concluído. Só entram empresas com IE e download ligado.',
+        sub: `${pct(T.ok, T.base)}% · ${T.base - T.ok ? `faltam ${T.base - T.ok}` : 'tudo baixado'}`,
+        extra: `<svg class="ring" width="54" height="54" aria-hidden="true"><circle cx="27" cy="27" r="22" fill="none" stroke="var(--line)" stroke-width="7"/><circle class="arco" cx="27" cy="27" r="22" fill="none" stroke="var(--ok)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${arco.toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 27 27)"/></svg>` })}
+      ${kpi({ ico: 'notas', cor: 'az', l: 'Notas baixadas', v: totE + totS, sub: `<span class="duo"><i class="le"></i>${n(totE)} entrada <i class="ls"></i>${n(totS)} saída</span>`,
+        extra: `<div class="kbar duo"><span class="le" style="width:${pct(totE, totE + totS)}%"></span><span class="ls" style="width:${pct(totS, totE + totS)}%"></span></div>` })}
+      ${kpi({ ico: 'ok', cor: b.empresas.length && T.emDia === b.empresas.length ? 'vd' : 'am', l: 'Entregas em dia', v: T.emDia, de: 'de ' + b.empresas.length, href: '#/entregas?mostrar=pendencia', d: 'Empresas sem nenhuma obrigação pendente ou atrasada nesta competência.',
+        sub: b.empresas.length - T.emDia ? `${b.empresas.length - T.emDia} com pendência` : 'tudo em dia', pct: pct(T.emDia, b.empresas.length) })}
+      ${kpi({ ico: 'erro', cor: T.erro ? 'vm' : 'vd', l: 'Empresas com erro', v: T.erro, href: '#/entregas?mostrar=erro', sub: T.erro ? 'precisam refazer' : 'nenhum erro', pct: T.erro ? pct(T.erro, T.base) : null })}
     </section>
     <section class="cols" style="grid-template-columns:2.9fr 1fr">
       <div class="card tbl-wrap">
@@ -691,10 +715,11 @@ async function telaEntregas(filtro = { esc: '', mostrar: 'todas', busca: '' }) {
       let ok = 0, tot = 0;
       for (const e of base) { const s = statusEnt(b, e, k); if (s !== 'na') { tot++; if (FEITO(s)) ok++; } }
       const pend = tot - ok;
-      return `<button type="button" class="card kpi clic ${filtro.mostrar === 'ob:' + k ? 'on' : ''}" data-kpi="ob:${k}" title="Mostrar só as pendentes de ${l}" style="padding:14px"><div class="l">${l}</div><div class="v" style="font-size:20px">${ok}<small> / ${tot}</small></div><div class="l" style="font-size:12px;margin-top:4px">${pend ? `${pend} pendente${pend > 1 ? 's' : ''}` : 'tudo entregue'}</div></button>`;
+      return kpi({ mini: true, ico: !tot ? 'vazio' : pend ? 'notas' : 'ok', cor: !tot ? 'cz' : pend ? 'am' : 'vd', l, v: ok, de: '/ ' + tot, on: filtro.mostrar === 'ob:' + k, attrs: `data-kpi="ob:${k}" title="Mostrar só as pendentes de ${l}"`,
+        sub: !tot ? 'ninguém tem' : pend ? `${pend} pendente${pend > 1 ? 's' : ''}` : 'tudo entregue', pct: tot ? Math.round(ok / tot * 100) : null });
     }).join('');
     const sme = base.filter(e => e.baixar_entrada && semMov(b, e, 'entrada')).length, sms = base.filter(e => e.baixar_saida && semMov(b, e, 'saida')).length;
-    return cards + `<div class="card kpi" style="padding:14px"><div class="l">Sem movimento</div>
+    return cards + `<div class="card kpi mini k-cz"><i class="kic">${ic(KIC.vazio)}</i><div class="l">Sem movimento</div>
       <button type="button" class="lnk ${filtro.mostrar === 'semmov_entrada' ? 'on' : ''}" data-kpi="semmov_entrada">Entrada: <b>${sme}</b></button>
       <button type="button" class="lnk ${filtro.mostrar === 'semmov_saida' ? 'on' : ''}" data-kpi="semmov_saida">Saída: <b>${sms}</b></button></div>`;
   };
@@ -811,8 +836,11 @@ async function telaEscritorio(id, aba = 'empresas') {
   const es = b.escritorios.find(e => e.id === id);
   if (!es) return layout(vez, 'escritorios', '<div class="empty">Escritório não encontrado.</div>');
   let ne = 0, ns = 0, emDia = 0;
+  const D = { ok: 0, fila: 0, erro: 0, nao: 0, base: 0 }, porReg = {};
   for (const e of b.empresas) {
     ne += qtd(b, e, 'entrada') || 0; ns += qtd(b, e, 'saida') || 0;
+    const k = chaveDl(b, e); if (k !== 'fora') { D.base++; D[k === 'atencao' ? 'ok' : k]++; }
+    porReg[e.regime] = (porReg[e.regime] || 0) + 1;
     if (OBRIG.every(([k]) => !['pendente', 'atrasado'].includes(statusEnt(b, e, k)))) emDia++;
   }
   let corpo = '';
@@ -891,10 +919,13 @@ async function telaEscritorio(id, aba = 'empresas') {
       </div>
     </div>
     <section class="kpis">
-      <div class="card pad kpi"><div class="l">Empresas</div><div class="v">${b.empresas.length}</div></div>
-      <div class="card pad kpi"><div class="l">Notas de entrada</div><div class="v">${n(ne)}</div></div>
-      <div class="card pad kpi"><div class="l">Notas de saída</div><div class="v">${n(ns)}</div></div>
-      <div class="card pad kpi"><div class="l">Entregas em dia</div><div class="v">${emDia}<small> de ${b.empresas.length}</small></div></div>
+      ${kpi({ ico: 'emp', cor: 'az', l: 'Empresas', v: b.empresas.length, attrs: 'data-ir-chip="todas" title="Mostrar todas as empresas"', sub: Object.entries(porReg).sort((x, y) => y[1] - x[1]).map(([r, q]) => `${q} ${REGIMES[r] || 'sem regime'}`).join(' · ') })}
+      ${kpi({ ico: 'baixar', cor: D.erro ? 'vm' : D.base && D.ok === D.base ? 'vd' : 'az', l: 'Downloads concluídos', v: D.ok, de: 'de ' + D.base, attrs: `data-ir-chip="${D.erro ? 'erro' : D.fila ? 'fila' : D.nao ? 'nao' : 'ok'}" title="Mostrar ${D.erro ? 'as empresas com erro' : D.fila ? 'as que estão na fila' : D.nao ? 'as que faltam baixar' : 'as concluídas'}"`,
+        sub: [[D.erro, 'com erro'], [D.fila, 'na fila'], [D.nao, 'não baixado']].filter(x => x[0]).map(x => x.join(' ')).join(' · ') || 'tudo baixado', pct: D.base ? Math.round(D.ok / D.base * 100) : null })}
+      ${kpi({ ico: 'notas', cor: 'az', l: 'Notas baixadas', v: ne + ns, sub: `<span class="duo"><i class="le"></i>${n(ne)} entrada <i class="ls"></i>${n(ns)} saída</span>`,
+        extra: `<div class="kbar duo"><span class="le" style="width:${ne + ns ? Math.round(ne / (ne + ns) * 100) : 0}%"></span><span class="ls" style="width:${ne + ns ? 100 - Math.round(ne / (ne + ns) * 100) : 0}%"></span></div>` })}
+      ${kpi({ ico: 'ok', cor: b.empresas.length && emDia === b.empresas.length ? 'vd' : 'am', l: 'Entregas em dia', v: emDia, de: 'de ' + b.empresas.length, href: `#/entregas?esc=${id}&mostrar=pendencia`,
+        sub: b.empresas.length - emDia ? `${b.empresas.length - emDia} com pendência` : 'tudo em dia', pct: b.empresas.length ? Math.round(emDia / b.empresas.length * 100) : null })}
     </section>
     <div class="tabs">
       <button type="button" class="tab ${aba === 'empresas' ? 'on' : ''}" data-aba="empresas">Empresas</button>
@@ -927,6 +958,7 @@ async function telaEscritorio(id, aba = 'empresas') {
     if ($('#flimpar')) $('#flimpar').onclick = ev => { ev.preventDefault(); fe.q = ''; fe.chip = 'todas'; $('#fq').value = ''; endereco(aba); filtrar(); atualizarSel(); };
   }
   ligarEntregas(b);
+  $$('[data-ir-chip]').forEach(c => c.onclick = () => { fe.chip = c.dataset.irChip; fe.q = ''; endereco('empresas'); if (aba !== 'empresas') return telaEscritorio(id, 'empresas'); $('#fq').value = ''; filtrar(); atualizarSel(); $('.chips')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
   ligarSeletorPc(id);
   $('#baixar').onclick = () => pedirExecucao(id);
   $$('[data-baixar-ie]').forEach(bt => bt.onclick = ev => { ev.stopPropagation(); pedirExecucao(id, bt.dataset.baixarIe); });
@@ -1137,10 +1169,10 @@ async function telaAlertas(f = { aba: 'abertos', tipo: '', esc: '' }) {
   await layout(vez, 'alertas', `
     <div class="top"><div><div class="sub">Erros e mudanças de qualquer empresa${eAdmin() ? ', de todos os escritórios' : ''}</div><h1>Alertas</h1></div></div>
     <section class="kpis">
-      <div class="card pad kpi"><div class="l" style="color:var(--err-t);font-weight:600">Erros</div><div class="v">${cnt('erro')}</div><div class="sub">precisam de ação</div></div>
-      <div class="card pad kpi"><div class="l" style="color:var(--navy);font-weight:600">Mudanças</div><div class="v">${cnt('mudanca')}</div><div class="sub">notas ou cadastro alterados</div></div>
-      <div class="card pad kpi"><div class="l" style="color:var(--warn-t);font-weight:600">Avisos</div><div class="v">${cnt('aviso')}</div><div class="sub">vale conferir</div></div>
-      <div class="card pad kpi"><div class="l" style="color:var(--ok-t);font-weight:600">Resolvidos hoje</div><div class="v">${resolvHoje.count || 0}</div></div>
+      ${kpi({ ico: 'erro', cor: cnt('erro') ? 'vm' : 'cz', l: 'Erros', v: cnt('erro'), sub: 'precisam de ação', on: f.tipo === 'erro', attrs: 'data-tipo="erro" title="Mostrar só os erros"' })}
+      ${kpi({ ico: 'troca', cor: cnt('mudanca') ? 'az' : 'cz', l: 'Mudanças', v: cnt('mudanca'), sub: 'notas ou cadastro alterados', on: f.tipo === 'mudanca', attrs: 'data-tipo="mudanca" title="Mostrar só as mudanças"' })}
+      ${kpi({ ico: 'sino', cor: cnt('aviso') ? 'am' : 'cz', l: 'Avisos', v: cnt('aviso'), sub: 'vale conferir', on: f.tipo === 'aviso', attrs: 'data-tipo="aviso" title="Mostrar só os avisos"' })}
+      ${kpi({ ico: 'ok', cor: 'vd', l: 'Resolvidos hoje', v: resolvHoje.count || 0, sub: 'ver os resolvidos', on: f.aba === 'resolvidos', attrs: 'data-ver-resolvidos title="Mostrar os resolvidos"' })}
     </section>
     <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--line)">
       <div style="display:flex;gap:4px">${[['abertos', `Abertos (${abertos.length})`], ['resolvidos', 'Resolvidos'], ['todos', 'Todos']].map(([k, l]) => `<button type="button" class="tab ${f.aba === k ? 'on' : ''}" data-aba="${k}" style="border-bottom-width:2px">${l}</button>`).join('')}</div>
@@ -1159,6 +1191,8 @@ async function telaAlertas(f = { aba: 'abertos', tipo: '', esc: '' }) {
         </div></div>`).join('') : '<div class="empty">Nenhum alerta aqui.</div>'}</section>`);
   const rec = (mud = {}) => telaAlertas({ aba: f.aba, tipo: $('#ftipo').value, esc: $('#fesc')?.value || '', ...mud });
   $$('[data-aba]').forEach(t => t.onclick = () => rec({ aba: t.dataset.aba }));
+  $$('[data-tipo]').forEach(c => c.onclick = () => rec({ aba: 'abertos', tipo: f.tipo === c.dataset.tipo && f.aba === 'abertos' ? '' : c.dataset.tipo }));
+  $('[data-ver-resolvidos]').onclick = () => rec({ aba: f.aba === 'resolvidos' ? 'abertos' : 'resolvidos', tipo: '' });
   $('#ftipo').onchange = () => rec(); if ($('#fesc')) $('#fesc').onchange = () => rec();
   ligarAlertas(() => rec());
 }
