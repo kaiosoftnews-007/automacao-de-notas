@@ -824,6 +824,13 @@ async function telaEscritorios() {
     limparCache(); toast('Escritório cadastrado.'); go('#/escritorio/' + es.id);
   };
 }
+// Contadores do escritório (vários logins da Sefaz, um por empresa). null se o banco ainda não tem a tabela.
+async function carregarContadores(escritorioId) {
+  if (!escritorioId) return null;
+  const { data, error } = await sb.from('contadores').select('*').eq('escritorio_id', escritorioId).order('nome');
+  return error ? null : data;
+}
+const pillContador = c => !c.cpf || !c.senha_secret_id ? '<span class="pill pe">Falta CPF e senha</span>' : pillSefaz(c.situacao);
 function pillSefaz(s) {
   return { ok: '<span class="pill ok">Funcionando</span>', recusada: '<span class="pill er">Senha recusada</span>', erro: '<span class="pill er">Erro</span>', nao_testado: '<span class="pill pe">Não testado</span>' }[s] || '<span class="pill na">Não cadastrado</span>';
 }
@@ -832,7 +839,9 @@ function pillSefaz(s) {
 async function telaEscritorio(id, aba = 'empresas') {
   const vez = ++st.vez;
   if (!eAdmin() && id !== st.perfil.escritorio_id) return go('#/escritorio/' + st.perfil.escritorio_id);
-  const [b, cred, pcs] = await Promise.all([carregarBase(id), q(sb.from('credenciais_sefaz').select('*').eq('escritorio_id', id).maybeSingle()), carregarPcs()]);
+  const [b, cred, pcs, conts] = await Promise.all([carregarBase(id), q(sb.from('credenciais_sefaz').select('*').eq('escritorio_id', id).maybeSingle()), carregarPcs(), carregarContadores(id)]);
+  const nomeCont = Object.fromEntries((conts || []).map(c => [c.id, c.nome]));
+  const temCont = !!conts?.length;
   const es = b.escritorios.find(e => e.id === id);
   if (!es) return layout(vez, 'escritorios', '<div class="empty">Escritório não encontrado.</div>');
   let ne = 0, ns = 0, emDia = 0;
@@ -846,7 +855,7 @@ async function telaEscritorio(id, aba = 'empresas') {
   let corpo = '';
   const sel = selecao[id] = selecao[id] || new Set();
   const ORD_DL = { Erro: 0, 'Atenção': 1, 'Na fila': 2, 'Não baixado': 3, OK: 4, Desligado: 5, 'Sem IE': 6 };
-  const fe = st.fEsc[id] = st.fEsc[id] || { q: '' }; fe.chip = fe.chip || 'todas';
+  const fe = st.fEsc[id] = st.fEsc[id] || { q: '' }; fe.chip = fe.chip || 'todas'; fe.cont = temCont ? fe.cont || '' : '';
   if (aba !== 'usuarios') st.reexibir = () => telaEscritorio(id, aba);
   const CURTO = { impt_nfs: 'NFs', apuracao: 'Apur.', pgdas: 'DAS', efd_icms_ipi: 'ICMS', efd_contrib: 'Contrib.', mit: 'MIT', efd_reinf: 'Reinf' };
   // Linha de baixo do nome: o motivo do erro, a etapa do download ou quando terminou
@@ -869,19 +878,20 @@ async function telaEscritorio(id, aba = 'empresas') {
       cont[k]++; if (sm) cont.semmov++;
       const obs = OBRIG.filter(([o]) => statusEnt(b, e, o) !== 'na');
       const pend = obs.filter(([o]) => ['pendente', 'atrasado'].includes(statusEnt(b, e, o))).length;
-      return `<tr class="click ${c === 'er' ? 'lin-er' : ''}" title="Clique na linha para abrir e editar a empresa" data-href="#/empresa/${e.id}" data-k="${k}" data-sm="${sm ? 1 : 0}" data-t="${h(semAcento([e.razao_social, e.codigo, e.ie, e.cnpj, REGIMES[e.regime]].join(' ')))} ${String(e.cnpj || '').replace(/\D/g, '')} ${String(e.ie || '').replace(/\D/g, '')}">
+      return `<tr class="click ${c === 'er' ? 'lin-er' : ''}" title="Clique na linha para abrir e editar a empresa" data-href="#/empresa/${e.id}" data-k="${k}" data-sm="${sm ? 1 : 0}" data-c="${e.contador_id || '-'}" data-t="${h(semAcento([e.razao_social, e.codigo, e.ie, e.cnpj, REGIMES[e.regime], nomeCont[e.contador_id]].join(' ')))} ${String(e.cnpj || '').replace(/\D/g, '')} ${String(e.ie || '').replace(/\D/g, '')}">
         <td class="chk-col">${e.ie ? `<input type="checkbox" class="selEmp" data-ie="${h(e.ie)}" aria-label="Selecionar ${h(e.razao_social)}" ${sel.has(e.ie) ? 'checked' : ''}>` : ''}</td><td>${h(e.codigo || '')}</td>
-        <td data-ord="${h(e.razao_social)}"><div style="font-weight:600">${h(e.razao_social)}</div>${infoDl(e, c, l)}</td><td title="CNPJ ${h(e.cnpj || '—')}">${h(e.ie || '—')}</td><td>${REGIMES[e.regime] || '—'}</td>
+        <td data-ord="${h(e.razao_social)}"><div style="font-weight:600">${h(e.razao_social)}</div>${infoDl(e, c, l)}</td><td title="CNPJ ${h(e.cnpj || '—')}">${h(e.ie || '—')}</td>${temCont ? `<td data-ord="${h(nomeCont[e.contador_id] || '')}">${e.contador_id ? `<span class="pill cont">${h(nomeCont[e.contador_id] || '?')}</span>` : '<span class="sub">Escritório</span>'}</td>` : ''}<td>${REGIMES[e.regime] || '—'}</td>
         <td class="c">${qtd(b, e, 'entrada') ?? '—'}</td><td class="c">${qtd(b, e, 'saida') ?? '—'}</td><td data-ord="${ORD_DL[l] ?? 9}"><span class="pill ${sm ? 'sm' : c}">${sm ? 'Sem mov.' : l}</span></td>
         <td data-ord="${pend}">${obs.map(([o]) => { const s = statusEnt(b, e, o); return `<button type="button" class="s ${ST_ENT[s][0]}" data-emp="${e.id}" data-ob="${o}" data-st="${s}" data-curto="${CURTO[o]}" title="${CURTO[o]}: ${ST_ENT[s][1]} (clique para mudar)">${CURTO[o]}</button>`; }).join(' ') || '—'}</td>
         <td><div class="acts">${e.ie ? `<button type="button" class="btn s ${c === 'er' ? 'p' : ''}" data-baixar-ie="${h(e.ie)}" title="Baixar só esta empresa">${c === 'er' ? 'Refazer' : 'Baixar'}</button>` : ''}</div></td></tr>`;
     }).join('');
     const chip = (k, nome, qt) => qt || k === 'todas' ? `<button type="button" class="chip ${fe.chip === k ? 'on' : ''}" data-chip="${k}">${nome} <em>${qt}</em></button>` : '';
     corpo = `<div class="chips"><label class="busca" style="flex:0 1 300px;height:38px">${ic('M21 21l-4.3-4.3M11 18a7 7 0 100-14 7 7 0 000 14z')}<input id="fq" type="text" placeholder="Filtrar: nome, código, IE, CNPJ ou regime" value="${h(fe.q)}" autocomplete="off"></label>
+      ${temCont ? `<label class="f cont-f">Contador<select id="fcontador"><option value="">Todos</option>${conts.map(c => `<option value="${c.id}" ${fe.cont === c.id ? 'selected' : ''}>${h(c.nome)}</option>`).join('')}${b.empresas.some(e => !e.contador_id) ? `<option value="-" ${fe.cont === '-' ? 'selected' : ''}>Login do escritório</option>` : ''}</select></label>` : ''}
       ${chip('todas', 'Todas', b.empresas.length)}${chip('erro', '<i class="r"></i>Erro', cont.erro)}${chip('fila', '<i class="y"></i>Na fila', cont.fila)}${chip('nao', '<i class="z"></i>Não baixado', cont.nao)}${chip('atencao', 'Atenção', cont.atencao)}${chip('ok', '<i class="g"></i>OK', cont.ok)}${chip('semmov', 'Sem movimento', cont.semmov)}
       <span class="sub" id="fcont" style="margin-left:auto"></span></div>
     <div class="selbar card" id="selbar" hidden><span id="selqtd"></span><button type="button" class="btn s p" id="baixarSel">Baixar selecionadas</button><button type="button" class="btn s" id="marcarSel">Marcar entrega</button><button type="button" class="btn s" id="exportarSel">Exportar</button><button type="button" class="btn s" id="limparSel">Limpar</button></div>
-    <div class="card tbl-wrap">${b.empresas.length ? `<table class="tbl" id="tabEmp"><thead><tr><th data-nosort class="chk-col"><input type="checkbox" id="selTodas" title="Selecionar todas as que estão aparecendo" aria-label="Selecionar todas"></th><th>Cód.</th><th>Empresa</th><th>IE</th><th>Regime</th><th class="c">Entrada</th><th class="c">Saída</th><th>Download</th><th>Entregas</th><th data-nosort></th></tr></thead><tbody>
+    <div class="card tbl-wrap">${b.empresas.length ? `<table class="tbl" id="tabEmp"><thead><tr><th data-nosort class="chk-col"><input type="checkbox" id="selTodas" title="Selecionar todas as que estão aparecendo" aria-label="Selecionar todas"></th><th>Cód.</th><th>Empresa</th><th>IE</th>${temCont ? '<th>Contador</th>' : ''}<th>Regime</th><th class="c">Entrada</th><th class="c">Saída</th><th>Download</th><th>Entregas</th><th data-nosort></th></tr></thead><tbody>
       ${linhas}
       </tbody></table><div class="empty" id="fvazio" hidden>Nenhuma empresa com esse filtro. <a href="#" id="flimpar">Limpar filtro</a></div>` : `<div class="empty">Nenhuma empresa ainda. <a href="#/empresa/novo?esc=${id}">Cadastre</a> ou importe sua planilha.</div>`}</div>`;
   } else if (aba === 'downloads') {
@@ -945,7 +955,7 @@ async function telaEscritorio(id, aba = 'empresas') {
     const tab = $('#tabEmp'); if (!tab) return;
     const t = semAcento(fe.q.trim()); let vis = 0;
     for (const tr of tab.tBodies[0].rows) {
-      const ok = (fe.chip === 'todas' || (fe.chip === 'semmov' ? tr.dataset.sm === '1' : tr.dataset.k === fe.chip)) && (!t || tr.dataset.t.includes(t));
+      const ok = (fe.chip === 'todas' || (fe.chip === 'semmov' ? tr.dataset.sm === '1' : tr.dataset.k === fe.chip)) && (!t || tr.dataset.t.includes(t)) && (!fe.cont || tr.dataset.c === fe.cont);
       tr.hidden = !ok; if (ok) vis++;
     }
     $$('[data-chip]').forEach(c => c.classList.toggle('on', c.dataset.chip === fe.chip));
@@ -954,8 +964,9 @@ async function telaEscritorio(id, aba = 'empresas') {
   };
   if ($('#fq')) {
     $('#fq').oninput = e => { fe.q = e.target.value; filtrar(); atualizarSel(); };
+    if ($('#fcontador')) $('#fcontador').onchange = e => { fe.cont = e.target.value; filtrar(); atualizarSel(); };
     $$('[data-chip]').forEach(c => c.onclick = () => { fe.chip = fe.chip === c.dataset.chip ? 'todas' : c.dataset.chip; endereco(aba); filtrar(); atualizarSel(); });
-    if ($('#flimpar')) $('#flimpar').onclick = ev => { ev.preventDefault(); fe.q = ''; fe.chip = 'todas'; $('#fq').value = ''; endereco(aba); filtrar(); atualizarSel(); };
+    if ($('#flimpar')) $('#flimpar').onclick = ev => { ev.preventDefault(); fe.q = ''; fe.chip = 'todas'; fe.cont = ''; if ($('#fcontador')) $('#fcontador').value = ''; $('#fq').value = ''; endereco(aba); filtrar(); atualizarSel(); };
   }
   ligarEntregas(b);
   $$('[data-ir-chip]').forEach(c => c.onclick = () => { fe.chip = c.dataset.irChip; fe.q = ''; endereco('empresas'); if (aba !== 'empresas') return telaEscritorio(id, 'empresas'); $('#fq').value = ''; filtrar(); atualizarSel(); $('.chips')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
@@ -1049,6 +1060,7 @@ async function telaEmpresa(id, params) {
   const es = escs.find(e => e.id === emp.escritorio_id);
   const rot = rotinas.find(r => r.escritorio_id === emp.escritorio_id);
   const sel = (v, a) => v === a ? 'selected' : '';
+  const conts = await carregarContadores(emp.escritorio_id);
   await layout(vez, 'escritorios', `
     <div class="top"><div><div class="sub"><a href="#/escritorio/${emp.escritorio_id}">${h(es?.nome || 'Escritório')}</a> / ${nova ? 'Nova empresa' : h(emp.razao_social)}</div><h1>${nova ? 'Cadastrar empresa' : 'Editar empresa'}</h1></div></div>
     <div class="cols form">
@@ -1066,7 +1078,9 @@ async function telaEmpresa(id, params) {
         </section>
         <section class="card pad" style="display:flex;flex-direction:column;gap:12px">
           <h2>Download de notas na Sefaz-GO</h2>
-          <div class="sub">O robô usa o login do contador do escritório e a inscrição estadual acima. Sem IE, a empresa fica só no controle de entregas.</div>
+          <div class="sub">O robô usa o login do contador e a inscrição estadual acima. Sem IE, a empresa fica só no controle de entregas.</div>
+          ${conts ? `<label class="f">Contador (login usado na Sefaz)<select name="contador_id"><option value="">Login do escritório (padrão)</option>${conts.map(c => `<option value="${c.id}" ${sel(c.id, emp.contador_id)}>${h(c.nome)}${!c.cpf || !c.senha_secret_id ? ' — falta CPF e senha' : ''}</option>`).join('')}</select>
+            <span class="sub" style="font-weight:400">Em branco = usa o login do escritório. Os contadores ficam em <a href="#/acesso?esc=${emp.escritorio_id}">Acesso à Sefaz</a>.</span></label>` : ''}
           <div class="g2"><div>
             <label class="chk"><input type="checkbox" name="baixar_entrada" ${emp.baixar_entrada ? 'checked' : ''}>Baixar notas de entrada</label>
             <label class="chk"><input type="checkbox" name="baixar_saida" ${emp.baixar_saida ? 'checked' : ''}>Baixar notas de saída</label>
@@ -1107,6 +1121,8 @@ async function telaEmpresa(id, params) {
       obrigacoes: OBRIG.map(([k]) => k).filter(k => fd.has('ob_' + k)),
       pasta: (fd.get('pasta') || '').trim().replace(/[\\/]+$/, '') || null,
     };
+    // Contador: só os do escritório desta empresa (mudou de escritório = volta para o login do escritório).
+    if (conts) reg.contador_id = reg.escritorio_id === emp.escritorio_id ? fd.get('contador_id') || null : null;
     if (nova) await q(sb.from('empresas').insert(reg)); else await q(sb.from('empresas').update(reg).eq('id', id));
     limparCache(); toast('Empresa salva.'); go('#/escritorio/' + reg.escritorio_id);
   };
@@ -1208,6 +1224,12 @@ async function telaAcesso(params) {
   const cm = Object.fromEntries(creds.map(c => [c.escritorio_id, c]));
   const selId = params.get('esc') || (eAdmin() ? escs[0]?.id : st.perfil.escritorio_id);
   const es = escs.find(e => e.id === selId); const c = cm[selId];
+  const [conts, empsCont] = es ? await Promise.all([carregarContadores(selId),
+    sb.from('empresas').select('contador_id').eq('escritorio_id', selId).eq('ativa', true).not('contador_id', 'is', null).then(r => r.data || [])]) : [null, []];
+  const nEmp = {}; for (const e of empsCont) nEmp[e.contador_id] = (nEmp[e.contador_id] || 0) + 1;
+  const contId = params.get('cont');
+  const ct = contId === 'novo' ? {} : conts?.find(x => x.id === contId) || null;
+  const qsCont = v => `#/acesso?esc=${selId}&cont=${v}`;
   await layout(vez, 'acesso', `
     <div class="top"><div><div class="sub">Login do contador usado pelo robô, um por escritório</div><h1>Acesso à Sefaz-GO</h1></div></div>
     <div class="cols form">
@@ -1227,6 +1249,25 @@ async function telaAcesso(params) {
         <div class="sub">A senha fica guardada criptografada. Depois de salva, ninguém consegue ver, só trocar.${c?.alterada_em ? `<br>Última alteração: ${new Date(c.alterada_em).toLocaleDateString('pt-BR')}` : ''}</div>
       </form>` : ''}
     </div>
+    ${conts ? `<div class="cols form" id="contadores">
+      <section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Contadores do escritório</h2><div class="sub" style="margin-top:4px">Cada empresa baixa com o login do seu contador (escolhido no cadastro da empresa). Empresas sem contador usam o login do escritório, acima.</div></div>
+        ${conts.length ? `<table class="tbl"><thead><tr><th>Contador</th><th>CPF</th><th class="c">Empresas</th><th>Situação</th><th>Último teste</th><th></th></tr></thead><tbody>
+        ${conts.map(x => `<tr class="click ${ct?.id === x.id ? 'sel-row' : ''}" data-href="${qsCont(x.id)}"><td style="font-weight:600">${h(x.nome)}</td><td>${x.cpf ? mascCpf(x.cpf) : '—'}</td><td class="c">${nEmp[x.id] || 0}</td>
+          <td>${pillContador(x)}</td><td>${quando(x.ultimo_teste)}</td><td style="text-align:right"><a class="btn s lk" href="${qsCont(x.id)}">Editar</a></td></tr>`).join('')}
+        </tbody></table>` : '<div class="empty">Nenhum contador ainda. Só precisa se cada empresa usar o login de um contador diferente.</div>'}
+        <div class="pad" style="padding-top:12px"><a class="btn o s lk" href="${qsCont('novo')}">+ Novo contador</a></div></section>
+      ${ct ? `<form class="card pad" id="fc" style="display:flex;flex-direction:column;gap:12px">
+        <div><div class="sub" style="text-transform:uppercase;letter-spacing:.06em;font-weight:600">${ct.id ? 'Editando contador' : 'Novo contador'}</div><h2 style="font-size:18px;margin-top:4px">${h(ct.nome || es.nome)}</h2></div>
+        ${ct.situacao === 'recusada' ? `<div class="msg err">A Sefaz recusou a senha ${quando(ct.ultimo_teste)}. Se ela mudou, atualize aqui.</div>` : ''}
+        <label class="f">Nome<input name="nome" required value="${h(ct.nome)}"></label>
+        <label class="f">CPF<input name="cpf" required inputmode="numeric" value="${h(ct.cpf)}" placeholder="000.000.000-00"></label>
+        <label class="f">${ct.senha_secret_id ? 'Nova senha da Sefaz' : 'Senha da Sefaz'}<input name="senha" type="password" autocomplete="new-password" ${ct.senha_secret_id ? 'placeholder="Deixe em branco para manter a atual"' : 'required'}></label>
+        <label class="chk"><input type="checkbox" id="verc">Mostrar senha</label>
+        <button class="btn p" type="submit">Salvar contador</button>
+        ${ct.id ? `<button type="button" class="btn del-o" id="excluirCont">Excluir contador</button>` : ''}
+        <div class="sub">A senha fica criptografada. Depois de salva, ninguém consegue ver, só trocar.</div>
+      </form>` : '<div class="card pad sub">Clique em um contador para cadastrar o CPF e a senha da Sefaz dele.</div>'}
+    </div>` : ''}
     ${pcs.length ? `<section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Computadores com a extensão</h2><div class="sub" style="margin-top:4px">Aparecem em "Baixar em". Exclua os que não usa mais. Ao remover a extensão do Chrome (versão 3.8.1 ou mais nova), o computador sai daqui sozinho.</div></div>
       <table class="tbl"><thead><tr><th>Computador</th><th>Situação</th><th>Último sinal</th><th>Versão</th><th></th></tr></thead><tbody>
       ${pcs.map(p => `<tr><td style="font-weight:600">${h(p.nome)}${p.id === meuPc() ? ' <span class="sub">(este)</span>' : ''}</td>
@@ -1238,6 +1279,20 @@ async function telaAcesso(params) {
   $$('[data-tirar-pc]').forEach(bt => bt.onclick = async () => {
     if (await excluirPc(pcs.find(p => p.id === bt.dataset.tirarPc))) telaAcesso(params);
   });
+  if ($('#fc')) {
+    $('#verc').onchange = e => { $('#fc [name=senha]').type = e.target.checked ? 'text' : 'password'; };
+    $('#fc').onsubmit = async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const novoId = await q(sb.rpc('salvar_contador', { p_escritorio: selId, p_id: ct.id || null, p_nome: fd.get('nome').trim(), p_cpf: fd.get('cpf').replace(/\D/g, ''), p_senha: fd.get('senha') || null }));
+      limparCache(); toast('Contador salvo.'); go(qsCont(novoId));
+    };
+    if ($('#excluirCont')) $('#excluirCont').onclick = async () => {
+      if (!confirm(`Excluir o contador ${ct.nome}? As ${nEmp[ct.id] || 0} empresas dele passam a usar o login do escritório.`)) return;
+      await q(sb.from('contadores').delete().eq('id', ct.id));
+      limparCache(); toast('Contador excluído.'); go('#/acesso?esc=' + selId);
+    };
+  }
   if (!$('#f')) return;
   $('#ver').onchange = e => { $('[name=senha]').type = e.target.checked ? 'text' : 'password'; };
   $('#f').onsubmit = async e => {

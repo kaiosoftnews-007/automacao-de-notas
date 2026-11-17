@@ -70,6 +70,8 @@ automacao-de-notas/
 | Importar planilha Excel | `importarPlanilha` |
 | Alertas | `telaAlertas` |
 | Acesso à Sefaz (CPF e senha do contador) | `telaAcesso` |
+| Contadores por empresa (cadastro, CPF e senha) | `telaAcesso` (quadro Contadores), `carregarContadores`, `pillContador` |
+| Contador da empresa / coluna e filtro Contador | `telaEmpresa` (campo `contador_id`), `telaEscritorio` |
 | Rotina (pasta mãe, período) | `telaRotina` |
 | Competência padrão e lista de meses | `compPadrao`, `compOpcoes` |
 | Rotas (endereços #/…) | `rota` |

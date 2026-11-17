@@ -180,3 +180,5 @@ button.kpi{appearance:none}
 .kpi.k-vm .v{color:var(--err-t)}.kpi.k-cz .v{color:var(--muted)}
 .kpi.on{outline:2px solid var(--kc);outline-offset:-1px;background:var(--kb)}.kpi.on .kic{background:var(--card)}
 html[data-tema=escuro] .k-az{--kc:#7FA9F0;--kb:#1C2C45}html[data-tema=escuro] .k-vd{--kc:#5FC592;--kb:#16382A}html[data-tema=escuro] .k-am{--kc:#E2B33C;--kb:#3A3320}html[data-tema=escuro] .k-vm{--kc:#F08A80;--kb:#4A1F1C}
+.pill.cont{background:var(--soft);color:var(--navy);border:1px solid var(--soft-line)}
+.f.cont-f{flex-direction:row;align-items:center;gap:8px}.f.cont-f select{height:38px}
