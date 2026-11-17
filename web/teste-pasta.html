@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Teste da escolha de pasta</title>
+<style>
+  body { font: 15px/1.5 system-ui, "Segoe UI", sans-serif; background: #F4F6F9; color: #172033; margin: 0; }
+  .caixa { max-width: 720px; margin: 24px auto; background: #fff; border: 1px solid #DDE3EA; border-radius: 12px; padding: 20px 24px; }
+  h1 { font-size: 20px; margin: 0 0 6px; color: #1F3864; }
+  .passo { border-top: 1px solid #DDE3EA; padding: 12px 0; }
+  button { font: 600 14px system-ui, sans-serif; padding: 9px 16px; border-radius: 8px; border: 0; background: #1F3864; color: #fff; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  pre { background: #0F172A; color: #E2E8F0; padding: 12px; border-radius: 8px; white-space: pre-wrap; font-size: 12px; min-height: 60px; }
+  small { color: #5A6678; }
+</style>
+</head>
+<body>
+<div class="caixa">
+  <h1>Teste da escolha de pasta</h1>
+  <small>Não grava nada no seu computador. Só mostra em qual passo o Chrome recusa. Faça os passos em ordem e mande um print desta página no final.</small>
+
+  <div class="passo"><b>1.</b> Escolher a pasta <b>só para ler</b> (escolha a mesma pasta da extensão).<br>
+    <button id="b1">1. Escolher pasta (ler)</button></div>
+  <div class="passo"><b>2.</b> Pedir permissão para <b>gravar</b> na pasta escolhida no passo 1.<br>
+    <button id="b2" disabled>2. Pedir permissão de gravar</button></div>
+  <div class="passo"><b>3.</b> Escolher a pasta já pedindo <b>ler e gravar</b> (é o que a extensão faz).<br>
+    <button id="b3">3. Escolher pasta (ler e gravar)</button></div>
+  <div class="passo"><b>4.</b> Escolher um <b>arquivo</b> qualquer (para comparar).<br>
+    <button id="b4">4. Escolher arquivo</button></div>
+
+  <pre id="log"></pre>
+</div>
+<script>
+const log = (t) => { document.getElementById('log').textContent += t + '\n'; };
+log('Navegador: ' + navigator.userAgent);
+log('showDirectoryPicker existe: ' + (typeof window.showDirectoryPicker));
+let pasta = null;
+const tempo = (t0) => ((performance.now() - t0) / 1000).toFixed(1) + ' s';
+const erro = (passo, e, t0) => log(`${passo}: ERRO ${e && e.name} - ${e && e.message} (depois de ${tempo(t0)})`);
+
+document.getElementById('b1').onclick = async () => {
+  const t0 = performance.now();
+  try {
+    pasta = await showDirectoryPicker({ id: 'teste-ler', mode: 'read' });
+    const nomes = [];
+    for await (const item of pasta.values()) { nomes.push(item.name); if (nomes.length >= 8) break; }
+    log(`Passo 1: OK, pasta "${pasta.name}" (depois de ${tempo(t0)}). Tem: ${nomes.join(', ') || '(vazia)'}`);
+    document.getElementById('b2').disabled = false;
+  } catch (e) { erro('Passo 1', e, t0); }
+};
+document.getElementById('b2').onclick = async () => {
+  const t0 = performance.now();
+  try {
+    log('Passo 2: permissão antes = ' + await pasta.queryPermission({ mode: 'readwrite' }));
+    const r = await pasta.requestPermission({ mode: 'readwrite' });
+    log(`Passo 2: resposta = ${r} (depois de ${tempo(t0)})`);
+  } catch (e) { erro('Passo 2', e, t0); }
+};
+document.getElementById('b3').onclick = async () => {
+  const t0 = performance.now();
+  try {
+    const p = await showDirectoryPicker({ id: 'teste-gravar', mode: 'readwrite' });
+    log(`Passo 3: OK, pasta "${p.name}", permissão de gravar = ${await p.queryPermission({ mode: 'readwrite' })} (depois de ${tempo(t0)})`);
+  } catch (e) { erro('Passo 3', e, t0); }
+};
+document.getElementById('b4').onclick = async () => {
+  const t0 = performance.now();
+  try {
+    const [f] = await showOpenFilePicker();
+    log(`Passo 4: OK, arquivo "${f.name}" (depois de ${tempo(t0)})`);
+  } catch (e) { erro('Passo 4', e, t0); }
+};
+</script>
+</body>
+</html>
