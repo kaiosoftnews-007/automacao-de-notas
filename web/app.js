@@ -21,7 +21,7 @@ const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#142744" stroke-width="2" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M12 12v6"/><path d="M9 15l3 3 3-3"/></svg>';
 
 // ---------- estado ----------
-const st = { session: null, perfil: null, comp: compPadrao() };
+const st = { session: null, perfil: null, comp: compPadrao(), vez: 0, cache: new Map(), fEsc: {}, reexibir: null };
 const selecao = {};   // empresas marcadas em cada escritório (IEs), para o botão Baixar selecionadas
 
 function compPadrao() { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return iso(d); }
@@ -93,7 +93,7 @@ function editarEscritorio(es) {
       e.preventDefault();
       const fd = new FormData(form);
       await q(sb.from('escritorios').update({ nome: fd.get('nome').trim(), cnpj: fd.get('cnpj') || null, email_contato: fd.get('email_contato') || null }).eq('id', es.id));
-      toast('Escritório atualizado.'); fechar(true);
+      limparCache(); toast('Escritório atualizado.'); fechar(true);
     };
   });
 }
@@ -107,7 +107,7 @@ function confirmarComSenha(titulo, texto) {
       <h2 id="mt" style="font-size:18px">${h(titulo)}</h2>
       <div class="msg err">${h(texto)}</div>
       <label class="f">Digite sua senha para confirmar<input type="password" name="senha" required autocomplete="current-password"></label>
-      <div class="sub" id="merr" style="color:#9B1C12"></div>
+      <div class="sub" id="merr" style="color:var(--err-t)"></div>
       <div style="display:flex;gap:10px;justify-content:flex-end"><button type="button" class="btn" id="mcanc">Cancelar</button><button type="submit" class="btn del">Excluir</button></div>
     </form>`;
     document.body.appendChild(fundo);
@@ -130,61 +130,239 @@ function confirmarComSenha(titulo, texto) {
 const go = r => { location.hash = r; };
 
 // ---------- layout ----------
+// Menu, computadores, alertas e o download que está rodando. Fica guardado por 60 s; a atualização automática força.
 function carregarMenu(forcar = false) {
   if (!forcar && st.menuP && Date.now() - st.menuEm < 60000) return st.menuP;
   st.menuEm = Date.now();
-  st.menuP = Promise.all([
-    sb.from('alertas').select('id', { count: 'exact', head: true }).is('resolvido_em', null),
-    sb.from('robo_status').select('ultimo_sinal').eq('id', 'principal').maybeSingle(),
-    sb.from('computadores').select('*').order('nome'),
-    sb.from('extensao_versoes').select('versao').eq('principal', true).maybeSingle(),
-  ]);
+  st.menuP = (async () => {
+    const desde = new Date(Date.now() - 12 * 3600e3).toISOString();
+    const [al, pcsR, princR, exeR] = await Promise.all([
+      sb.from('alertas').select('id', { count: 'exact', head: true }).is('resolvido_em', null),
+      sb.from('computadores').select('*').order('nome'),
+      sb.from('extensao_versoes').select('versao').eq('principal', true).maybeSingle(),
+      sb.from('execucoes').select('id,escritorio_id,status,pc_id,ie,competencia,solicitada_em,iniciada_em,escritorios(nome)')
+        .in('status', ['rodando', 'aguardando_pc']).gte('solicitada_em', desde).order('solicitada_em', { ascending: false }).limit(6),
+    ]);
+    const exes = exeR?.data || [], rod = exes.find(x => x.status === 'rodando');
+    let vivo = null;
+    if (rod) {   // andamento do download que está rodando: empresas terminadas / empresas do pedido
+      const [dl, tot] = await Promise.all([
+        sb.from('downloads').select('empresa_id,status,mensagem,atualizado_em').eq('execucao_id', rod.id).order('atualizado_em').limit(1000),
+        rod.ie ? null : sb.from('empresas').select('id', { count: 'exact', head: true }).eq('escritorio_id', rod.escritorio_id).eq('ativa', true).not('ie', 'is', null),
+      ]);
+      const porEmp = {};
+      for (const d of dl?.data || []) (porEmp[d.empresa_id] = porEmp[d.empresa_id] || []).push(d);
+      const feitas = Object.values(porEmp).filter(l => l.every(d => !['fila', 'processando'].includes(d.status))).length;
+      const total = rod.ie ? rod.ie.split(',').filter(Boolean).length : (tot?.count || 0);
+      vivo = { exe: rod, feitas, total: Math.max(total, feitas), ult: (dl?.data || []).at(-1) || null };
+    }
+    return { alertas: al?.count || 0, pcs: pcsR?.data || [], principal: princR?.data?.versao || null, exes, vivo };
+  })();
   return st.menuP;
 }
 
 // Troca de tela instantânea: mantém o menu e mostra "carregando" enquanto busca os dados
 function mostrarCarregando() {
   const m = root.querySelector('main');
-  if (m) m.innerHTML = '<div class="empty" style="padding:80px">Carregando…</div>';
+  if (m) m.innerHTML = '<div class="esq"><i></i><i></i><i></i><i></i></div><div class="empty" style="padding:40px">Carregando…</div>';
   const side = root.querySelector('#side'); if (side) side.classList.remove('open');
 }
 
-async function layout(ativo, conteudo) {
-  const [{ count }, robo, pcsR, princR] = await carregarMenu();
-  const pcs = pcsR?.data || [], pcsOn = pcs.filter(pcOnline);
-  const atrasados = princR?.data ? pcs.filter(p => desatualizado(p, princR.data.versao)).length : 0;
+const ic = d => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const ICO = {
+  painel: 'M3 12l9-8 9 8M5 10v10h14V10', entregas: 'M5 12l4 4 10-10', escritorios: 'M4 21V5h10v16M14 9h6v12M8 9h2M8 13h2M8 17h2',
+  alertas: 'M12 3l9 16H3zM12 10v4M12 17h.01', acesso: 'M7 11V7a5 5 0 0110 0v4M5 11h14v10H5z', atualizacoes: 'M12 3v12M7 10l5 5 5-5M4 21h16',
+  rotina: 'M12 7v5l3 2M12 3a9 9 0 100 18 9 9 0 000-18z',
+};
+const haQuanto = t => {
+  if (!t) return '—';
+  const m = Math.max(0, Math.round((Date.now() - new Date(t)) / 60000));
+  return m < 1 ? 'agora' : m < 60 ? `há ${m} min` : m < 1440 ? `há ${Math.round(m / 60)} h` : `há ${Math.round(m / 1440)} d`;
+};
+// Cada tela pega um número ao começar; se outra tela começou depois, a antiga não desenha por cima.
+const CANCELADA = 'tela-cancelada';
+window.addEventListener('unhandledrejection', e => { if (e.reason === CANCELADA) e.preventDefault(); });
+
+async function layout(vez, ativo, conteudo) {
+  const m = await carregarMenu();
+  if (vez !== st.vez) throw CANCELADA;
+  const pcs = m.pcs;
+  const atrasados = m.principal ? pcs.filter(p => desatualizado(p, m.principal)).length : 0;
   const parados = pcs.filter(p => p.verificacao_desde && pcOnline(p));
-  const online = robo.data?.ultimo_sinal && (Date.now() - new Date(robo.data.ultimo_sinal)) < 5 * 60 * 1000;
   const itens = eAdmin()
     ? [['#/', 'Painel geral', 'painel'], ['#/entregas', 'Visão de entregas', 'entregas'], ['#/escritorios', 'Escritórios', 'escritorios'],
        ['#/alertas', 'Alertas', 'alertas'], ['#/acesso', 'Acesso à Sefaz', 'acesso'], ['#/atualizacoes', 'Atualizações', 'atualizacoes']]
     : [['#/escritorio/' + st.perfil.escritorio_id, 'Meu escritório', 'escritorios'], ['#/entregas', 'Entregas', 'entregas'],
        ['#/alertas', 'Alertas', 'alertas'], ['#/acesso', 'Acesso à Sefaz', 'acesso'], ['#/rotina/' + st.perfil.escritorio_id, 'Rotina automática', 'rotina']];
-  root.innerHTML = `
-  <div class="app">
-    <aside class="side" id="side">
+  st.itensMenu = itens;
+  const estadoPc = p => p.verificacao_desde && pcOnline(p) ? 'verificação' : m.exes.some(x => x.status === 'rodando' && x.pc_id === p.id) ? 'baixando' : pcOnline(p) ? 'livre' : haQuanto(p.ultimo_sinal);
+  const lado = `
       <div class="brand"><i>${ICON}</i>Automação de Notas</div>
       <nav class="nav">${itens.map(([href, label, k]) =>
-        `<a href="${href}" class="${k === ativo ? 'on' : ''}">${label}${k === 'alertas' && count ? ` <span class="badge">${count}</span>` : ''}${k === 'atualizacoes' && atrasados ? ` <span class="badge" style="background:var(--gold)">${atrasados}</span>` : ''}</a>`).join('')}</nav>
+        `<a href="${href}" class="${k === ativo ? 'on' : ''}">${ic(ICO[k])}<span>${label}</span>${k === 'alertas' && m.alertas ? ` <span class="badge">${m.alertas}</span>` : ''}${k === 'atualizacoes' && atrasados ? ` <span class="badge" style="background:var(--gold)">${atrasados}</span>` : ''}</a>`).join('')}</nav>
       <div class="me">
-        <div class="robo"><span class="dot ${online ? 'on' : ''}"></span>Robô ${online ? 'online' : 'offline'}</div>
-        <div>${robo.data?.ultimo_sinal ? 'Último sinal: ' + quando(robo.data.ultimo_sinal) : 'Robô ainda não instalado'}</div>
-        ${pcs.length ? `<div class="robo" style="border-top:1px solid #34507E;padding-top:8px"><span class="dot ${pcsOn.length ? 'on' : ''}"></span>Extensões: ${pcsOn.length} online</div>
-        <div style="font-size:12px">${pcs.map(p => `${h(p.nome)} ${pcOnline(p) ? '●' : '○'}`).join(' · ')}</div>` : ''}
-        <div style="border-top:1px solid #34507E;padding-top:8px">${h(st.perfil.nome || st.perfil.email)}</div>
+        ${pcs.length ? `<div class="me-t">Computadores</div><div class="pcs">${pcs.map(p => `<div title="Último sinal: ${h(quando(p.ultimo_sinal))}"><span class="dot ${pcOnline(p) ? 'on' : ''}"></span>${h(p.nome)}<small>${estadoPc(p)}</small></div>`).join('')}</div>` : ''}
+        <div ${pcs.length ? 'style="border-top:1px solid #34507E;padding-top:8px"' : ''}>${h(st.perfil.nome || st.perfil.email)}</div>
         <button type="button" id="sair">Sair</button>
-      </div>
-    </aside>
-    <main>
-      <button type="button" class="btn menu-btn" id="menu" aria-label="Abrir menu">☰</button>
-      ${parados.map(p => `<div class="card" style="background:var(--err-bg);border-color:#F1B8B2;padding:14px 18px;color:#7A1A12;font-size:14px"><b>${h(p.nome)} parou na verificação "Confirme que é humano".</b> Entre por acesso remoto nele e clique na caixinha da aba da Sefaz; o download continua sozinho.</div>`).join('')}
-      ${conteudo}
-    </main>
-  </div>`;
+      </div>`;
+  const v = m.vivo, parado = v?.ult && Date.now() - new Date(v.ult.atualizado_em) > 15 * 60000;
+  const fila = m.exes.filter(x => x.status === 'aguardando_pc');
+  const nomePc = id => pcs.find(p => p.id === id)?.nome;
+  const faixaVivo = v ? `<div class="card run"><div class="spin"></div><div style="min-width:0">
+        <div class="t">Baixando agora · ${h(v.exe.escritorios?.nome || '')}${nomePc(v.exe.pc_id) ? ' · ' + h(nomePc(v.exe.pc_id)) : ''}${v.exe.competencia ? ' · ' + compNome(v.exe.competencia) : ''}</div>
+        <div class="d">${v.total ? `${v.feitas} de ${v.total} ${v.total === 1 ? 'empresa terminada' : 'empresas terminadas'}` : 'Começando…'}${v.ult ? ` · última novidade ${haQuanto(v.ult.atualizado_em)}${v.ult.mensagem ? ': ' + h(v.ult.mensagem) : ''}` : ''}${parado ? ' · <b>sem novidade há mais de 15 min: confira o computador</b>' : ''}</div>
+        <div class="pb"><span style="width:${v.total ? Math.round(v.feitas / v.total * 100) : 3}%"></span></div></div>
+        <a class="btn s lk" href="#/rotina/${v.exe.escritorio_id}">Ver detalhes</a></div>` : '';
+  const faixaFila = fila.length ? `<div class="sub">Na fila: ${fila.map(x => `${h(x.escritorios?.nome || '')} aguardando ${h(nomePc(x.pc_id) || 'o computador')}`).join(' · ')}</div>` : '';
+  const topo = `<div class="topbar">
+        <button type="button" class="btn menu-btn" id="menu" aria-label="Abrir menu">☰</button>
+        <button type="button" class="busca" id="abrirBusca" title="Buscar em todo o painel (Ctrl K)">${ic('M21 21l-4.3-4.3M11 18a7 7 0 100-14 7 7 0 000 14z')}<span>Buscar empresa, CNPJ, IE, escritório ou tela…</span><kbd>Ctrl K</kbd></button>
+        ${st.reexibir ? `<button type="button" class="vivo" id="vivo" title="Esta tela se atualiza sozinha a cada 30 segundos. Clique para atualizar agora."><i></i><span>Ao vivo · ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span></button>` : ''}
+        <button type="button" class="ico" id="tema" title="Modo claro / escuro" aria-label="Modo claro ou escuro">${document.documentElement.dataset.tema === 'escuro' ? '☀' : '☾'}</button>
+        <button type="button" class="ico" id="ajuda" title="Como usar o painel" aria-label="Ajuda">?</button>
+      </div>`;
+  if (!root.querySelector('.app')) root.innerHTML = '<div class="app"><aside class="side" id="side"></aside><main></main></div>';
+  $('#side').innerHTML = lado;
+  root.querySelector('main').innerHTML = `${topo}
+      ${parados.map(p => `<div class="card faixa-err"><b>${h(p.nome)} parou na verificação "Confirme que é humano".</b> Entre por acesso remoto nele e clique na caixinha da aba da Sefaz; o download continua sozinho.</div>`).join('')}
+      ${faixaVivo}${faixaFila}
+      ${conteudo}`;
   $('#sair').onclick = async () => { await sb.auth.signOut(); };
   $('#menu').onclick = () => $('#side').classList.toggle('open');
+  $('#abrirBusca').onclick = abrirBusca;
+  $('#ajuda').onclick = abrirAjuda;
+  $('#tema').onclick = () => {
+    const t = document.documentElement.dataset.tema === 'escuro' ? 'claro' : 'escuro';
+    document.documentElement.dataset.tema = t; gravarLocal('automacao-tema', t); $('#tema').textContent = t === 'escuro' ? '☀' : '☾';
+  };
+  if ($('#vivo')) $('#vivo').onclick = () => atualizarSozinho(true);
   ligarOrdenacao();
+  return true;
 }
+
+// ---------- atualização automática (sem F5) ----------
+// Só nas telas de acompanhamento (painel, escritório, entregas, alertas). Não mexe na tela enquanto
+// a pessoa digita, escolhe numa lista ou está com uma janela aberta.
+async function atualizarSozinho(forcar = false) {
+  if (!st.reexibir || !st.session) return;
+  const foco = document.activeElement?.tagName;
+  if (!forcar && (document.hidden || document.querySelector('.modal-fundo') || ['INPUT', 'SELECT', 'TEXTAREA'].includes(foco) || root.querySelector('details[open]'))) return;
+  limparCache(); carregarMenu(true);
+  try { await st.reexibir(); } catch (e) { if (e !== CANCELADA) console.error(e); }
+}
+setInterval(atualizarSozinho, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - (st.menuEm || 0) > 30000) atualizarSozinho(); });
+
+// ---------- busca rápida (Ctrl K) ----------
+const semAcento = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+function carregarIndice() {
+  if (st.indice && Date.now() - st.indiceEm < 5 * 60000) return st.indice;
+  st.indiceEm = Date.now();
+  st.indice = Promise.all([
+    todos(() => sb.from('empresas').select('id,razao_social,cnpj,ie,codigo,escritorio_id').eq('ativa', true).order('id')),
+    q(sb.from('escritorios').select('id,nome').order('nome')),
+  ]).then(([emps, escs]) => {
+    const nome = Object.fromEntries(escs.map(e => [e.id, e.nome]));
+    return { escs, emps: emps.map(e => ({ ...e, esc: nome[e.escritorio_id] || '', t: semAcento([e.razao_social, e.codigo, e.ie, e.cnpj].join(' ')), dig: [e.ie, e.cnpj].map(x => String(x || '').replace(/\D/g, '')).join(' ') })) };
+  });
+  st.indice.catch(() => { st.indice = null; });
+  return st.indice;
+}
+function abrirBusca() {
+  if (document.querySelector('.modal-fundo')) return;
+  const fundo = document.createElement('div'); fundo.className = 'modal-fundo alto';
+  fundo.innerHTML = `<div class="card pal" role="dialog" aria-modal="true" aria-label="Busca rápida">
+    <input id="palq" type="text" placeholder="Digite o nome, código, CNPJ ou IE da empresa, um escritório ou uma tela" autocomplete="off" spellcheck="false">
+    <div id="pall"></div><div class="pal-pe">↑ ↓ escolher · Enter abrir · Esc fechar</div></div>`;
+  document.body.appendChild(fundo);
+  const inp = fundo.querySelector('#palq'), lista = fundo.querySelector('#pall');
+  let itens = [], pos = 0, idx = null;
+  const fechar = () => { fundo.remove(); };
+  const desenhar = () => {
+    lista.innerHTML = itens.length ? itens.map((it, i) => `<button type="button" class="it ${i === pos ? 'on' : ''}" data-i="${i}"><b>${it.ico}</b><span>${h(it.nome)}</span><small>${h(it.info || '')}</small></button>`).join('')
+      : `<div class="empty" style="padding:20px">${idx ? 'Nada encontrado.' : 'Carregando empresas…'}</div>`;
+    lista.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+  };
+  const buscar = () => {
+    const t = semAcento(inp.value.trim()), dig = t.replace(/\D/g, '');
+    const telas = (st.itensMenu || []).map(([href, nome]) => ({ ico: '▸', nome: 'Ir para ' + nome, info: 'tela', ir: href }));
+    itens = [];
+    if (!t) itens = telas;
+    else if (idx) {
+      const emps = idx.emps.filter(e => e.t.includes(t) || (dig.length >= 3 && e.dig.includes(dig))).slice(0, 8);
+      itens.push(...emps.map(e => ({ ico: '🏢', nome: e.razao_social, info: [e.esc, e.ie ? 'IE ' + e.ie : ''].filter(Boolean).join(' · '), ir: '#/empresa/' + e.id })));
+      if (emps.length === 1 && emps[0].ie) itens.push({ ico: '▶', nome: 'Baixar as notas de ' + emps[0].razao_social, info: compNome(st.comp), fazer: () => pedirExecucao(emps[0].escritorio_id, emps[0].ie) });
+      if (eAdmin()) itens.push(...idx.escs.filter(e => semAcento(e.nome).includes(t)).slice(0, 4).map(e => ({ ico: '🗂', nome: e.nome, info: 'escritório', ir: '#/escritorio/' + e.id })));
+      itens.push(...telas.filter(x => semAcento(x.nome).includes(t)));
+    }
+    pos = 0; desenhar();
+  };
+  const escolher = i => { const it = itens[i]; if (!it) return; fechar(); if (it.fazer) it.fazer(); else go(it.ir); };
+  inp.oninput = buscar;
+  inp.onkeydown = e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); pos = Math.min(pos + 1, itens.length - 1); desenhar(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); pos = Math.max(pos - 1, 0); desenhar(); }
+    else if (e.key === 'Enter') { e.preventDefault(); escolher(pos); }
+    else if (e.key === 'Escape') fechar();
+  };
+  lista.onclick = e => { const b = e.target.closest('[data-i]'); if (b) escolher(+b.dataset.i); };
+  fundo.onclick = e => { if (e.target === fundo) fechar(); };
+  buscar(); inp.focus();
+  carregarIndice().then(x => { idx = x; if (fundo.isConnected) buscar(); }).catch(() => {});
+}
+document.addEventListener('keydown', e => {
+  if (!st.perfil || !root.querySelector('.app')) return;
+  const digitando = ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); abrirBusca(); }
+  else if (e.key === '/' && !digitando && !document.querySelector('.modal-fundo')) { e.preventDefault(); abrirBusca(); }
+});
+
+function abrirAjuda() {
+  if (document.querySelector('.modal-fundo')) return;
+  const fundo = document.createElement('div'); fundo.className = 'modal-fundo';
+  fundo.innerHTML = `<div class="card modal" role="dialog" aria-modal="true" style="max-width:560px"><h2 style="font-size:18px">Como usar o painel</h2>
+    <div class="ajuda">
+      <p><b>Buscar:</b> aperte <kbd>Ctrl</kbd> + <kbd>K</kbd> (ou <kbd>/</kbd>) em qualquer tela e digite o nome, o código, o CNPJ ou a IE da empresa.</p>
+      <p><b>Ao vivo:</b> Painel geral, escritório, entregas e alertas se atualizam sozinhos a cada 30 segundos. Clique em "Ao vivo" para atualizar na hora.</p>
+      <p><b>Cartões:</b> clique num cartão de número para abrir a lista só com aquelas empresas.</p>
+      <p><b>Cores do download:</b> <span class="pill ok">OK</span> ZIP na pasta · <span class="pill pe">Na fila</span> pedido feito, esperando · <span class="pill pe">Atenção</span> um lado veio sem notas · <span class="pill er">Erro</span> precisa refazer · <span class="pill na">Não baixado</span> ainda não pedido.</p>
+      <p><b>Entregas:</b> clique no quadradinho da obrigação para trocar: Pendente → OK → N/A → Atraso. Impt. NFs se marca sozinha pelo download.</p>
+      <p><b>Várias empresas:</b> marque as caixinhas na tela do escritório para baixar, marcar entrega ou exportar só as escolhidas.</p>
+      <p><b>Tabelas:</b> clique no título de uma coluna para ordenar; clique de novo para inverter.</p>
+    </div>
+    <div style="display:flex;justify-content:flex-end"><button type="button" class="btn p" id="mok">Entendi</button></div></div>`;
+  document.body.appendChild(fundo);
+  fundo.querySelector('#mok').onclick = () => fundo.remove();
+  fundo.onclick = e => { if (e.target === fundo) fundo.remove(); };
+  fundo.querySelector('#mok').focus();
+}
+
+// Botões de entrega (quadradinhos): clicar troca o status. Vale na Visão de entregas e na tela do escritório.
+function ligarEntregas(b, depois) {
+  $$('button.s[data-ob]').forEach(bt => bt.onclick = async ev => {
+    ev.stopPropagation();
+    const novo = CICLO[bt.dataset.st];
+    await q(sb.from('entregas').upsert({ empresa_id: bt.dataset.emp, competencia: st.comp, obrigacao: bt.dataset.ob, status: novo, atualizado_por: st.session.user.id, atualizado_em: new Date().toISOString() }));
+    bt.dataset.st = novo; bt.className = 's ' + ST_ENT[novo][0];
+    if (bt.dataset.curto) bt.title = `${bt.dataset.curto}: ${ST_ENT[novo][1]} (clique para mudar)`; else bt.textContent = ST_ENT[novo][1];
+    b.entMap[bt.dataset.emp + bt.dataset.ob] = novo;
+    if (depois) depois(bt);
+  });
+}
+// Botões dos alertas: ação (refazer, atualizar senha) e Resolvido. Vale no Painel geral e na tela de Alertas.
+function ligarAlertas(depois) {
+  $$('[data-resolver]').forEach(bt => bt.onclick = async () => {
+    await q(sb.from('alertas').update({ resolvido_em: new Date().toISOString(), resolvido_por: st.session.user.id }).eq('id', bt.dataset.resolver));
+    carregarMenu(true); depois();
+  });
+  $$('[data-acao]').forEach(bt => bt.onclick = async () => {
+    if (bt.dataset.acao === 'atualizar_senha') return go('#/acesso?esc=' + bt.dataset.esc);
+    await pedirExecucao(bt.dataset.esc);
+    await q(sb.from('alertas').update({ resolvido_em: new Date().toISOString(), resolvido_por: st.session.user.id }).eq('id', bt.dataset.id));
+    carregarMenu(true); depois();
+  });
+}
+const ACAO_ALERTA = { atualizar_senha: 'Atualizar senha', tentar_de_novo: 'Tentar de novo', baixar_novas: 'Baixar as novas' };
 
 // ---------- ordenar tabelas clicando no título da coluna ----------
 // Vale para toda tabela do painel (menos as agrupadas, como a Visão de entregas). Clicar de novo inverte.
@@ -278,7 +456,18 @@ function telaNovaSenha() {
 }
 
 // ---------- dados comuns ----------
-async function carregarBase(escritorioId) {
+// Os dados de uma tela ficam guardados por 20 s: trocar de aba, filtrar ou voltar não busca tudo de novo.
+// Qualquer gravação (empresa, escritório, pedido de download) limpa o que estava guardado.
+const limparCache = () => st.cache.clear();
+function carregarBase(escritorioId) {
+  const k = (escritorioId || '*') + '|' + st.comp, c = st.cache.get(k);
+  if (c && Date.now() - c.em < 20000) return c.p;
+  const p = buscarBase(escritorioId);
+  st.cache.set(k, { em: Date.now(), p });
+  p.catch(() => st.cache.delete(k));
+  return p;
+}
+async function buscarBase(escritorioId) {
   const doEsc = c => escritorioId ? c.eq('escritorio_id', escritorioId) : c;
   const emp = () => doEsc(sb.from('empresas').select('*').eq('ativa', true)).order('razao_social').order('id');
   const dl = () => doEsc(sb.from('downloads').select('empresa_id,tipo,status,qtd_notas,mensagem,atualizado_em').eq('competencia', st.comp)).order('atualizado_em').order('id');
@@ -333,11 +522,11 @@ const cmpVer = (a, b) => { const x = String(a || '0').split('.').map(Number), y 
   for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; } return 0; };
 const desatualizado = (p, principal) => !!principal && cmpVer(p.versao, principal) < 0;
 // Janela de confirmação (Cancelar / ação em vermelho). Devolve true se confirmou.
-function confirmar(titulo, texto, botao) {
+function confirmar(titulo, texto, botao, cor = 'del') {
   return new Promise(resolve => {
     const fundo = document.createElement('div'); fundo.className = 'modal-fundo';
     fundo.innerHTML = `<div class="card modal" role="dialog" aria-modal="true"><h2>${h(titulo)}</h2><div style="font-size:14px;color:var(--ink2)">${h(texto)}</div>
-      <div style="display:flex;gap:10px;justify-content:flex-end"><button type="button" class="btn" id="mcanc">Cancelar</button><button type="button" class="btn del" id="mok">${h(botao)}</button></div></div>`;
+      <div style="display:flex;gap:10px;justify-content:flex-end"><button type="button" class="btn" id="mcanc">Cancelar</button><button type="button" class="btn ${cor}" id="mok">${h(botao)}</button></div></div>`;
     document.body.appendChild(fundo);
     const fechar = ok => { fundo.remove(); resolve(ok); };
     fundo.querySelector('#mcanc').onclick = () => fechar(false);
@@ -382,6 +571,7 @@ function ligarSeletorPc(escritorioId) {
 }
 
 async function pedirExecucao(escritorioId, ie = null) {
+  limparCache(); setTimeout(() => carregarMenu(true), 1500);
   const pcs = await carregarPcs();
   const { data: es } = await sb.from('escritorios').select('id,pc_padrao').eq('id', escritorioId).maybeSingle();
   const alvo = pcEscolhido(es || { id: escritorioId }, pcs);
@@ -407,59 +597,91 @@ async function pedirExecucao(escritorioId, ie = null) {
 }
 
 // ---------- painel geral (admin) ----------
+// Situação do download de cada empresa numa palavra só (usada nos filtros e nas barras coloridas)
+const CHAVE_DL = { Erro: 'erro', 'Na fila': 'fila', 'Não baixado': 'nao', 'Atenção': 'atencao', OK: 'ok' };
+const chaveDl = (b, e) => CHAVE_DL[statusDownload(b, e)[1]] || 'fora';   // fora = sem IE ou desligado
+const emDiaEmp = (b, e) => OBRIG.every(([k]) => !['pendente', 'atrasado'].includes(statusEnt(b, e, k)));
+const dica = t => `<span class="q" tabindex="0" data-dica="${h(t)}">?</span>`;
 async function telaPainel() {
+  const vez = ++st.vez;
   if (!eAdmin()) return go('#/escritorio/' + st.perfil.escritorio_id);
-  const b = await carregarBase();
-  const alertas = await q(sb.from('alertas').select('*, escritorios(nome), empresas(razao_social)').is('resolvido_em', null).order('criado_em', { ascending: false }).limit(6));
-  let totE = 0, totS = 0, comErro = 0;
+  st.reexibir = telaPainel;
+  const [b, alertas, creds] = await Promise.all([
+    carregarBase(),
+    q(sb.from('alertas').select('*, escritorios(nome), empresas(razao_social)').is('resolvido_em', null).order('criado_em', { ascending: false }).limit(6)),
+    q(sb.from('credenciais_sefaz').select('escritorio_id,situacao')),
+  ]);
+  const sit = Object.fromEntries(creds.map(c => [c.escritorio_id, c.situacao]));
+  let totE = 0, totS = 0;
+  const T = { ok: 0, fila: 0, erro: 0, nao: 0, base: 0, emDia: 0 };
   const porEsc = b.escritorios.map(es => {
     const emps = b.empresas.filter(e => e.escritorio_id === es.id);
-    let ne = 0, ns = 0, erro = 0, fila = 0, emDia = 0;
+    const r = { es, emps, ne: 0, ns: 0, ok: 0, fila: 0, erro: 0, nao: 0, base: 0, emDia: 0, iesErro: [] };
     for (const e of emps) {
-      ne += qtd(b, e, 'entrada') || 0; ns += qtd(b, e, 'saida') || 0;
-      const [c] = statusDownload(b, e); if (c === 'er') erro++; if (c === 'pe') fila++;
-      if (OBRIG.every(([k]) => !['pendente', 'atrasado'].includes(statusEnt(b, e, k)))) emDia++;
+      r.ne += qtd(b, e, 'entrada') || 0; r.ns += qtd(b, e, 'saida') || 0;
+      const k = chaveDl(b, e);
+      if (k !== 'fora') { r.base++; r[k === 'atencao' ? 'ok' : k]++; if (k === 'erro') r.iesErro.push(e.ie); }
+      if (emDiaEmp(b, e)) r.emDia++;
     }
-    totE += ne; totS += ns; comErro += erro;
-    return { es, emps, ne, ns, erro, fila, emDia };
+    totE += r.ne; totS += r.ns;
+    for (const k of Object.keys(T)) T[k] += r[k];
+    return r;
   });
-  await layout('painel', `
+  const pct = (a, t) => t ? Math.round(a / t * 100) : 0;
+  const C = 2 * Math.PI * 22, arco = C * pct(T.ok, T.base) / 100;
+  const TIPO = { erro: ['er', 'Erro'], mudanca: ['mu', 'Mudança'], aviso: ['pe', 'Aviso'] };
+  await layout(vez, 'painel', `
     <div class="top">
       <div><div class="sub">Visão de todos os escritórios · competência ${compNome(st.comp)}</div><h1>Painel geral</h1></div>
       <div class="filters">
         <label class="f">Competência<select id="comp">${compOpcoes()}</select></label>
-        <a class="btn p" href="#/escritorios" style="display:inline-flex;align-items:center;text-decoration:none">+ Novo escritório</a>
+        <a class="btn p lk" href="#/escritorios">+ Novo escritório</a>
       </div>
     </div>
     <section class="kpis">
-      <div class="card pad kpi"><div class="l">Escritórios</div><div class="v">${b.escritorios.length}</div></div>
-      <div class="card pad kpi"><div class="l">Empresas ativas</div><div class="v">${b.empresas.length}</div></div>
-      <div class="card pad kpi"><div class="l">Notas baixadas</div><div class="v">${n(totE + totS)}</div><div class="sub">${n(totE)} entrada · ${n(totS)} saída</div></div>
-      <div class="card pad kpi ${comErro ? 'bad' : ''}"><div class="l">Empresas com erro</div><div class="v">${comErro}</div></div>
+      <a class="card pad kpi clic" href="#/entregas?mostrar=falta" title="Ver as empresas que ainda faltam baixar"><div class="l">Downloads concluídos${dica('Empresas com entrada e saída já baixadas nesta competência. "Sem movimento" conta como concluído. Só entram empresas com IE e download ligado.')}</div><div class="v">${T.ok}<small> de ${T.base}</small></div><div class="tr ok-t">${pct(T.ok, T.base)}% · ${T.base - T.ok ? `ver as ${T.base - T.ok} que faltam →` : 'tudo baixado'}</div>
+        <svg class="ring" width="54" height="54" aria-hidden="true"><circle cx="27" cy="27" r="22" fill="none" stroke="var(--line)" stroke-width="7"/><circle cx="27" cy="27" r="22" fill="none" stroke="var(--ok)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${arco.toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 27 27)"/></svg></a>
+      <div class="card pad kpi"><div class="l">Notas baixadas</div><div class="v">${n(totE + totS)}</div><div class="sub">${n(totE)} entrada · ${n(totS)} saída</div><div class="sub">${b.escritorios.length} ${b.escritorios.length === 1 ? 'escritório' : 'escritórios'} · ${b.empresas.length} empresas ativas</div></div>
+      <a class="card pad kpi clic" href="#/entregas?mostrar=pendencia" title="Ver as empresas com entrega pendente"><div class="l">Entregas em dia${dica('Empresas sem nenhuma obrigação pendente ou atrasada nesta competência.')}</div><div class="v">${T.emDia}<small> de ${b.empresas.length}</small></div><div class="tr">${b.empresas.length - T.emDia ? `${b.empresas.length - T.emDia} com pendência → ver quais` : 'tudo em dia'}</div></a>
+      <a class="card pad kpi clic ${T.erro ? 'bad' : ''}" href="#/entregas?mostrar=erro" title="Ver as empresas com erro no download"><div class="l">Empresas com erro</div><div class="v">${T.erro}</div><div class="tr">${T.erro ? 'ver quais →' : 'nenhum erro'}</div></a>
     </section>
-    <section class="cols">
+    <section class="cols" style="grid-template-columns:2.9fr 1fr">
       <div class="card tbl-wrap">
-        <div class="pad" style="padding-bottom:8px"><h2>Escritórios</h2></div>
-        ${porEsc.length ? `<table class="tbl"><thead><tr><th>Escritório</th><th class="c">Empresas</th><th class="c">Notas E / S</th><th>Downloads</th><th>Entregas em dia</th></tr></thead><tbody>
-        ${porEsc.map(r => `<tr class="click" data-href="#/escritorio/${r.es.id}"><td><a href="#/escritorio/${r.es.id}" style="font-weight:600">${h(r.es.nome)}</a></td>
-          <td class="c">${r.emps.length}</td><td class="c">${n(r.ne)} / ${n(r.ns)}</td>
-          <td>${r.erro ? `<span class="pill er">${r.erro} com erro</span>` : r.fila ? `<span class="pill pe">${r.fila} pendente(s)</span>` : `<span class="pill ok">Tudo ok</span>`}</td>
-          <td><span class="bar"><span style="width:${r.emps.length ? Math.round(r.emDia / r.emps.length * 100) : 0}%"></span></span> ${r.emDia} de ${r.emps.length}</td></tr>`).join('')}
+        <div class="pad" style="padding-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>Escritórios</h2><div class="leg"><i class="g"></i>ok <i class="y"></i>na fila <i class="r"></i>erro <i class="z"></i>não baixado</div></div>
+        ${porEsc.length ? `<table class="tbl"><thead><tr><th>Escritório</th><th class="c">Empresas</th><th>Downloads</th><th>Entregas</th><th data-nosort></th></tr></thead><tbody>
+        ${porEsc.map(r => `<tr class="click" data-href="#/escritorio/${r.es.id}"><td><a href="#/escritorio/${r.es.id}" style="font-weight:600">${h(r.es.nome)}</a><div class="sub">Sefaz: ${{ ok: 'funcionando', recusada: 'senha recusada', erro: 'erro', nao_testado: 'não testado' }[sit[r.es.id]] || 'não cadastrado'}</div></td>
+          <td class="c" title="${n(r.ne)} notas de entrada · ${n(r.ns)} de saída">${r.emps.length}</td>
+          <td data-ord="${r.erro * 1e6 + r.fila * 1e3 + r.nao}"><div class="seg3" style="width:120px" title="${r.ok} ok · ${r.fila} na fila · ${r.erro} com erro · ${r.nao} não baixado"><b class="g" style="width:${pct(r.ok, r.base)}%"></b><b class="y" style="width:${pct(r.fila, r.base)}%"></b><b class="r" style="width:${pct(r.erro, r.base)}%"></b></div><div class="leg">${[[r.ok, 'ok'], [r.fila, 'na fila'], [r.erro, 'erro'], [r.nao, 'não baixado']].filter(x => x[0]).map(x => x.join(' ')).join(' · ') || 'nenhuma empresa com IE'}</div></td>
+          <td data-ord="${pct(r.emDia, r.emps.length)}"><span class="bar" style="width:56px"><span style="width:${pct(r.emDia, r.emps.length)}%"></span></span> ${r.emDia} de ${r.emps.length}</td>
+          <td><div class="acts">${r.erro ? `<button type="button" class="btn s p" data-refazer="${r.es.id}" title="Pede de novo só as empresas com erro">Refazer ${r.erro}</button>` : ''}${r.base ? `<button type="button" class="btn s" data-baixar-esc="${r.es.id}" title="Baixar todas as empresas deste escritório">Baixar</button>` : ''}</div></td></tr>`).join('')}
         </tbody></table>` : `<div class="empty">Nenhum escritório ainda. <a href="#/escritorios">Cadastre o primeiro</a>.</div>`}
       </div>
       <div class="card pad" style="display:flex;flex-direction:column;gap:14px">
-        <h2>Alertas abertos</h2>
-        ${alertas.length ? alertas.map(a => `<div style="display:flex;gap:10px;align-items:flex-start"><span class="pill ${a.tipo === 'erro' ? 'er' : a.tipo === 'mudanca' ? 'mu' : 'pe'}">${a.tipo === 'erro' ? 'Erro' : a.tipo === 'mudanca' ? 'Mudança' : 'Aviso'}</span>
-          <div style="font-size:14px"><b>${h(a.escritorios?.nome || '')}</b> · ${h(a.titulo)}<div class="d">${h(a.detalhe || '')}</div></div></div>`).join('') : '<div class="sub">Nenhum alerta aberto.</div>'}
+        <h2>O que precisa de você</h2>
+        ${alertas.length ? alertas.map(a => `<div style="display:flex;gap:10px;align-items:flex-start"><span class="pill ${TIPO[a.tipo][0]}">${TIPO[a.tipo][1]}</span>
+          <div style="font-size:14px;min-width:0"><b>${h(a.escritorios?.nome || '')}</b> · ${h(a.titulo)}<div class="d">${h([a.empresas?.razao_social, a.detalhe].filter(Boolean).join(' · '))}</div>
+          <div class="acts" style="justify-content:flex-start;margin-top:6px">${a.acao && ACAO_ALERTA[a.acao] ? `<button type="button" class="btn s p" data-acao="${a.acao}" data-esc="${a.escritorio_id}" data-id="${a.id}">${ACAO_ALERTA[a.acao]}</button>` : ''}<button type="button" class="btn s" data-resolver="${a.id}">Resolvido</button></div></div></div>`).join('') : '<div class="sub">Nada pendente. Nenhum alerta aberto.</div>'}
         <a href="#/alertas" style="font-size:14px;font-weight:600">Ver todos os alertas</a>
       </div>
     </section>`);
   $('#comp').onchange = e => { st.comp = e.target.value; telaPainel(); };
-  $$('tr.click').forEach(tr => tr.onclick = ev => { if (ev.target.tagName !== 'A') go(tr.dataset.href); });
+  $$('tr.click').forEach(tr => tr.onclick = ev => { if (!ev.target.closest('a,button')) go(tr.dataset.href); });
+  $$('[data-refazer]').forEach(bt => bt.onclick = async () => {
+    const r = porEsc.find(x => x.es.id === bt.dataset.refazer);
+    bt.disabled = true; await pedirExecucao(r.es.id, r.iesErro.join(',')); telaPainel();
+  });
+  $$('[data-baixar-esc]').forEach(bt => bt.onclick = async () => {
+    const r = porEsc.find(x => x.es.id === bt.dataset.baixarEsc);
+    if (!await confirmar(`Baixar ${r.es.nome}?`, `Pede as notas de ${compNome(st.comp)} de todas as ${r.base} empresas com IE deste escritório.`, 'Baixar agora', 'p')) return;
+    await pedirExecucao(r.es.id); telaPainel();
+  });
+  ligarAlertas(telaPainel);
 }
 
 // ---------- visão de entregas ----------
 async function telaEntregas(filtro = { esc: '', mostrar: 'todas', busca: '' }) {
+  const vez = ++st.vez;
+  st.reexibir = () => telaEntregas(filtro);
   const b = await carregarBase(eAdmin() ? null : st.perfil.escritorio_id);
   // Cards: contam as empresas do escritório filtrado; clicar num card mostra só as pendentes daquela obrigação.
   const doEsc = () => b.empresas.filter(e => !filtro.esc || e.escritorio_id === filtro.esc);
@@ -482,6 +704,7 @@ async function telaEntregas(filtro = { esc: '', mostrar: 'todas', busca: '' }) {
     if (busca && ![e.razao_social, e.cnpj, e.ie, e.codigo].some(x => String(x || '').toLowerCase().includes(busca))) return false;
     if (filtro.mostrar === 'pendencia' && !OBRIG.some(([k]) => ['pendente', 'atrasado'].includes(statusEnt(b, e, k)))) return false;
     if (filtro.mostrar === 'erro' && statusDownload(b, e)[0] !== 'er') return false;
+    if (filtro.mostrar === 'falta' && !['erro', 'fila', 'nao'].includes(chaveDl(b, e))) return false;
     if (filtro.mostrar.startsWith('ob:') && !['pendente', 'atrasado'].includes(statusEnt(b, e, filtro.mostrar.slice(3)))) return false;
     if (filtro.mostrar === 'semmov_entrada' && !(e.baixar_entrada && semMov(b, e, 'entrada'))) return false;
     if (filtro.mostrar === 'semmov_saida' && !(e.baixar_saida && semMov(b, e, 'saida'))) return false;
@@ -501,7 +724,7 @@ async function telaEntregas(filtro = { esc: '', mostrar: 'todas', busca: '' }) {
           ${OBRIG.map(([k]) => { const s = statusEnt(b, e, k); return `<td class="c"><button type="button" class="s ${ST_ENT[s][0]}" data-emp="${e.id}" data-ob="${k}" data-st="${s}" title="Clique para mudar">${ST_ENT[s][1]}</button></td>`; }).join('')}</tr>`;
       }).join('');
   }).join('');
-  await layout('entregas', `
+  await layout(vez, 'entregas', `
     <div class="top">
       <div><div class="sub">${eAdmin() ? 'Todas as empresas de todos os escritórios' : 'Empresas do seu escritório'}</div><h1>Visão geral de entregas</h1></div>
       <button type="button" class="btn" id="exportar">Exportar Excel</button>
@@ -510,27 +733,28 @@ async function telaEntregas(filtro = { esc: '', mostrar: 'todas', busca: '' }) {
     <div class="filters">
       <label class="f">Competência<select id="comp">${compOpcoes()}</select></label>
       ${eAdmin() ? `<label class="f">Escritório<select id="fesc"><option value="">Todos</option>${b.escritorios.map(e => `<option value="${e.id}" ${e.id === filtro.esc ? 'selected' : ''}>${h(e.nome)}</option>`).join('')}</select></label>` : ''}
-      <label class="f">Mostrar<select id="fmos"><option value="todas">Todas as empresas</option><option value="pendencia" ${filtro.mostrar === 'pendencia' ? 'selected' : ''}>Só com pendência</option><option value="erro" ${filtro.mostrar === 'erro' ? 'selected' : ''}>Só com erro no download</option><option value="semmov_entrada" ${filtro.mostrar === 'semmov_entrada' ? 'selected' : ''}>Sem movimento na entrada</option><option value="semmov_saida" ${filtro.mostrar === 'semmov_saida' ? 'selected' : ''}>Sem movimento na saída</option>${OBRIG.map(([k, l]) => `<option value="ob:${k}" ${filtro.mostrar === 'ob:' + k ? 'selected' : ''}>Pendentes de ${l}</option>`).join('')}</select></label>
+      <label class="f">Mostrar<select id="fmos"><option value="todas">Todas as empresas</option><option value="pendencia" ${filtro.mostrar === 'pendencia' ? 'selected' : ''}>Só com pendência</option><option value="erro" ${filtro.mostrar === 'erro' ? 'selected' : ''}>Só com erro no download</option><option value="falta" ${filtro.mostrar === 'falta' ? 'selected' : ''}>Download ainda não concluído</option><option value="semmov_entrada" ${filtro.mostrar === 'semmov_entrada' ? 'selected' : ''}>Sem movimento na entrada</option><option value="semmov_saida" ${filtro.mostrar === 'semmov_saida' ? 'selected' : ''}>Sem movimento na saída</option>${OBRIG.map(([k, l]) => `<option value="ob:${k}" ${filtro.mostrar === 'ob:' + k ? 'selected' : ''}>Pendentes de ${l}</option>`).join('')}</select></label>
       <label class="f">Buscar<input id="fbus" type="text" placeholder="Empresa, CNPJ ou IE" value="${h(filtro.busca)}" style="width:240px"></label>
     </div>
     <div class="card tbl-wrap">${linhas ? `<table class="tbl" id="tab"><thead><tr><th>Escritório / Empresa</th><th>Regime</th><th class="c">Notas E / S</th><th class="c">Download</th>${OBRIG.map(([, l]) => `<th class="c">${l}</th>`).join('')}</tr></thead><tbody>${linhas}</tbody></table>` : '<div class="empty">Nenhuma empresa para mostrar.</div>'}</div>
     <div class="sub">Clique num status para trocar: Pendente → OK → N/A → Atraso. Impt. NFs se marca sozinha pelo download: OK = notas baixadas; "Sem mov." = sem notas na entrada e na saída; Pend. = erro ou download ainda não confirmado. Clique num card para ver só as pendentes dele; clique de novo para ver todas.</div>`);
-  const recarregar = () => telaEntregas({ esc: $('#fesc')?.value || '', mostrar: $('#fmos').value, busca: $('#fbus').value });
+  // O filtro vai para o endereço: F5 e o botão Voltar do navegador mantêm o que estava escolhido.
+  const recarregar = () => {
+    const f = { esc: $('#fesc')?.value || '', mostrar: $('#fmos').value, busca: $('#fbus').value };
+    const qs = new URLSearchParams(Object.entries(f).filter(([k, v]) => v && v !== 'todas')).toString();
+    history.replaceState(null, '', '#/entregas' + (qs ? '?' + qs : ''));
+    return telaEntregas(f);
+  };
   $('#comp').onchange = e => { st.comp = e.target.value; recarregar(); };
   if ($('#fesc')) $('#fesc').onchange = recarregar;
   $('#fmos').onchange = recarregar;
-  $('#fbus').onchange = recarregar;
+  let espera; $('#fbus').oninput = () => { clearTimeout(espera); espera = setTimeout(async () => {   // filtra enquanto digita
+    await recarregar(); const i = $('#fbus'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 350); };
   const ligarKpis = () => $$('[data-kpi]').forEach(c => c.onclick = () => {
     const v = c.dataset.kpi; $('#fmos').value = filtro.mostrar === v ? 'todas' : v; recarregar();
   });
   ligarKpis();
-  $$('button.s').forEach(bt => bt.onclick = async () => {
-    const novo = CICLO[bt.dataset.st];
-    await q(sb.from('entregas').upsert({ empresa_id: bt.dataset.emp, competencia: st.comp, obrigacao: bt.dataset.ob, status: novo, atualizado_por: st.session.user.id, atualizado_em: new Date().toISOString() }));
-    bt.dataset.st = novo; bt.className = 's ' + ST_ENT[novo][0]; bt.textContent = ST_ENT[novo][1];
-    b.entMap[bt.dataset.emp + bt.dataset.ob] = novo;
-    $('#kpis').innerHTML = kpisHtml(); ligarKpis();          // cards atualizam na hora
-  });
+  ligarEntregas(b, () => { $('#kpis').innerHTML = kpisHtml(); ligarKpis(); });   // cards atualizam na hora
   $('#exportar').onclick = async () => {
     const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
     const ws = XLSX.utils.table_to_sheet($('#tab'));
@@ -541,6 +765,7 @@ async function telaEntregas(filtro = { esc: '', mostrar: 'todas', busca: '' }) {
 
 // ---------- escritórios (admin) ----------
 async function telaEscritorios() {
+  const vez = ++st.vez;
   if (!eAdmin()) return go('#/escritorio/' + st.perfil.escritorio_id);
   const [escs, emps, creds] = await Promise.all([
     q(sb.from('escritorios').select('*').order('nome')),
@@ -548,7 +773,7 @@ async function telaEscritorios() {
     q(sb.from('credenciais_sefaz').select('escritorio_id,situacao')),
   ]);
   const sit = Object.fromEntries(creds.map(c => [c.escritorio_id, c.situacao]));
-  await layout('escritorios', `
+  await layout(vez, 'escritorios', `
     <div class="top"><div><div class="sub">Clientes contadores</div><h1>Escritórios</h1></div></div>
     <section class="cols">
       <div class="card tbl-wrap">${escs.length ? `<table class="tbl"><thead><tr><th>Escritório</th><th>CNPJ</th><th class="c">Empresas</th><th>Acesso Sefaz</th><th></th></tr></thead><tbody>
@@ -571,7 +796,7 @@ async function telaEscritorios() {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(e.target));
     const [es] = await q(sb.from('escritorios').insert(fd).select());
-    toast('Escritório cadastrado.'); go('#/escritorio/' + es.id);
+    limparCache(); toast('Escritório cadastrado.'); go('#/escritorio/' + es.id);
   };
 }
 function pillSefaz(s) {
@@ -580,10 +805,11 @@ function pillSefaz(s) {
 
 // ---------- escritório ----------
 async function telaEscritorio(id, aba = 'empresas') {
+  const vez = ++st.vez;
   if (!eAdmin() && id !== st.perfil.escritorio_id) return go('#/escritorio/' + st.perfil.escritorio_id);
   const [b, cred, pcs] = await Promise.all([carregarBase(id), q(sb.from('credenciais_sefaz').select('*').eq('escritorio_id', id).maybeSingle()), carregarPcs()]);
   const es = b.escritorios.find(e => e.id === id);
-  if (!es) return layout('escritorios', '<div class="empty">Escritório não encontrado.</div>');
+  if (!es) return layout(vez, 'escritorios', '<div class="empty">Escritório não encontrado.</div>');
   let ne = 0, ns = 0, emDia = 0;
   for (const e of b.empresas) {
     ne += qtd(b, e, 'entrada') || 0; ns += qtd(b, e, 'saida') || 0;
@@ -592,12 +818,44 @@ async function telaEscritorio(id, aba = 'empresas') {
   let corpo = '';
   const sel = selecao[id] = selecao[id] || new Set();
   const ORD_DL = { Erro: 0, 'Atenção': 1, 'Na fila': 2, 'Não baixado': 3, OK: 4, Desligado: 5, 'Sem IE': 6 };
+  const fe = st.fEsc[id] = st.fEsc[id] || { q: '' }; fe.chip = fe.chip || 'todas';
+  if (aba !== 'usuarios') st.reexibir = () => telaEscritorio(id, aba);
+  const CURTO = { impt_nfs: 'NFs', apuracao: 'Apur.', pgdas: 'DAS', efd_icms_ipi: 'ICMS', efd_contrib: 'Contrib.', mit: 'MIT', efd_reinf: 'Reinf' };
+  // Linha de baixo do nome: o motivo do erro, a etapa do download ou quando terminou
+  const infoDl = (e, c, l) => {
+    const ds = ['entrada', 'saida'].filter(x => e['baixar_' + x]).map(x => b.dlMap[e.id + x]).filter(Boolean);
+    if (!ds.length) return '';
+    const ult = ds.reduce((x, d) => (x.atualizado_em > d.atualizado_em ? x : d));
+    const linha = (t, cls = '') => `<div class="sub info ${cls}" title="${h(t)}">${h(t)}</div>`;
+    if (c === 'er') { const d = ds.find(x => x.status === 'erro'); return linha(`${d.mensagem || 'Erro no download'} · ${haQuanto(d.atualizado_em)}`, 'er-t'); }
+    if (l === 'Na fila') { const d = ds.find(x => ['fila', 'processando'].includes(x.status)); return linha(`${d.mensagem || (d.status === 'processando' ? 'Baixando…' : 'Na fila, esperando a vez')} · ${haQuanto(d.atualizado_em)}`); }
+    if (semMovTudo(b, e)) return linha('Sem notas de entrada nem de saída no mês');
+    if (l === 'Atenção') return linha('Um dos lados veio sem notas · ' + quando(ult.atualizado_em));
+    if (c === 'ok') return linha('Baixado ' + quando(ult.atualizado_em));
+    return '';
+  };
   if (aba === 'empresas') {
-    corpo = `<div class="selbar card" id="selbar" hidden><span id="selqtd"></span><button type="button" class="btn p" id="baixarSel">Baixar selecionadas</button><button type="button" class="btn" id="limparSel">Limpar seleção</button></div>
-    <div class="card tbl-wrap">${b.empresas.length ? `<table class="tbl"><thead><tr><th data-nosort class="chk-col"><input type="checkbox" id="selTodas" title="Selecionar todas" aria-label="Selecionar todas"></th><th>Cód.</th><th>Empresa</th><th>IE</th><th>CNPJ</th><th>Regime</th><th class="c">Entrada</th><th class="c">Saída</th><th>Download</th><th></th></tr></thead><tbody>
-      ${b.empresas.map(e => { const [c, l] = statusDownload(b, e); return `<tr class="click" data-href="#/empresa/${e.id}"><td class="chk-col">${e.ie ? `<input type="checkbox" class="selEmp" data-ie="${h(e.ie)}" aria-label="Selecionar ${h(e.razao_social)}" ${sel.has(e.ie) ? 'checked' : ''}>` : ''}</td><td>${h(e.codigo || '')}</td><td style="font-weight:600">${h(e.razao_social)}</td><td>${h(e.ie || '—')}</td><td>${h(e.cnpj || '—')}</td><td>${REGIMES[e.regime] || '—'}</td>
-        <td class="c">${qtd(b, e, 'entrada') ?? '—'}</td><td class="c">${qtd(b, e, 'saida') ?? '—'}</td><td data-ord="${ORD_DL[l] ?? 9}"><span class="pill ${c}">${l}</span></td><td style="text-align:right;white-space:nowrap">${e.ie ? `<button type="button" class="btn s" data-baixar-ie="${h(e.ie)}" title="Baixar só esta empresa">Baixar</button> ` : ''}<a class="btn s" href="#/empresa/${e.id}" style="display:inline-flex;align-items:center;text-decoration:none">Editar</a></td></tr>`; }).join('')}
-      </tbody></table>` : `<div class="empty">Nenhuma empresa ainda. <a href="#/empresa/novo?esc=${id}">Cadastre</a> ou importe sua planilha.</div>`}</div>`;
+    const cont = { erro: 0, fila: 0, nao: 0, atencao: 0, ok: 0, fora: 0, semmov: 0 };
+    const linhas = b.empresas.map(e => {
+      const [c, l] = statusDownload(b, e), k = chaveDl(b, e), sm = semMovTudo(b, e);
+      cont[k]++; if (sm) cont.semmov++;
+      const obs = OBRIG.filter(([o]) => statusEnt(b, e, o) !== 'na');
+      const pend = obs.filter(([o]) => ['pendente', 'atrasado'].includes(statusEnt(b, e, o))).length;
+      return `<tr class="click ${c === 'er' ? 'lin-er' : ''}" title="Clique na linha para abrir e editar a empresa" data-href="#/empresa/${e.id}" data-k="${k}" data-sm="${sm ? 1 : 0}" data-t="${h(semAcento([e.razao_social, e.codigo, e.ie, e.cnpj, REGIMES[e.regime]].join(' ')))} ${String(e.cnpj || '').replace(/\D/g, '')} ${String(e.ie || '').replace(/\D/g, '')}">
+        <td class="chk-col">${e.ie ? `<input type="checkbox" class="selEmp" data-ie="${h(e.ie)}" aria-label="Selecionar ${h(e.razao_social)}" ${sel.has(e.ie) ? 'checked' : ''}>` : ''}</td><td>${h(e.codigo || '')}</td>
+        <td data-ord="${h(e.razao_social)}"><div style="font-weight:600">${h(e.razao_social)}</div>${infoDl(e, c, l)}</td><td title="CNPJ ${h(e.cnpj || '—')}">${h(e.ie || '—')}</td><td>${REGIMES[e.regime] || '—'}</td>
+        <td class="c">${qtd(b, e, 'entrada') ?? '—'}</td><td class="c">${qtd(b, e, 'saida') ?? '—'}</td><td data-ord="${ORD_DL[l] ?? 9}"><span class="pill ${sm ? 'sm' : c}">${sm ? 'Sem mov.' : l}</span></td>
+        <td data-ord="${pend}">${obs.map(([o]) => { const s = statusEnt(b, e, o); return `<button type="button" class="s ${ST_ENT[s][0]}" data-emp="${e.id}" data-ob="${o}" data-st="${s}" data-curto="${CURTO[o]}" title="${CURTO[o]}: ${ST_ENT[s][1]} (clique para mudar)">${CURTO[o]}</button>`; }).join(' ') || '—'}</td>
+        <td><div class="acts">${e.ie ? `<button type="button" class="btn s ${c === 'er' ? 'p' : ''}" data-baixar-ie="${h(e.ie)}" title="Baixar só esta empresa">${c === 'er' ? 'Refazer' : 'Baixar'}</button>` : ''}</div></td></tr>`;
+    }).join('');
+    const chip = (k, nome, qt) => qt || k === 'todas' ? `<button type="button" class="chip ${fe.chip === k ? 'on' : ''}" data-chip="${k}">${nome} <em>${qt}</em></button>` : '';
+    corpo = `<div class="chips"><label class="busca" style="flex:0 1 300px;height:38px">${ic('M21 21l-4.3-4.3M11 18a7 7 0 100-14 7 7 0 000 14z')}<input id="fq" type="text" placeholder="Filtrar: nome, código, IE, CNPJ ou regime" value="${h(fe.q)}" autocomplete="off"></label>
+      ${chip('todas', 'Todas', b.empresas.length)}${chip('erro', '<i class="r"></i>Erro', cont.erro)}${chip('fila', '<i class="y"></i>Na fila', cont.fila)}${chip('nao', '<i class="z"></i>Não baixado', cont.nao)}${chip('atencao', 'Atenção', cont.atencao)}${chip('ok', '<i class="g"></i>OK', cont.ok)}${chip('semmov', 'Sem movimento', cont.semmov)}
+      <span class="sub" id="fcont" style="margin-left:auto"></span></div>
+    <div class="selbar card" id="selbar" hidden><span id="selqtd"></span><button type="button" class="btn s p" id="baixarSel">Baixar selecionadas</button><button type="button" class="btn s" id="marcarSel">Marcar entrega</button><button type="button" class="btn s" id="exportarSel">Exportar</button><button type="button" class="btn s" id="limparSel">Limpar</button></div>
+    <div class="card tbl-wrap">${b.empresas.length ? `<table class="tbl" id="tabEmp"><thead><tr><th data-nosort class="chk-col"><input type="checkbox" id="selTodas" title="Selecionar todas as que estão aparecendo" aria-label="Selecionar todas"></th><th>Cód.</th><th>Empresa</th><th>IE</th><th>Regime</th><th class="c">Entrada</th><th class="c">Saída</th><th>Download</th><th>Entregas</th><th data-nosort></th></tr></thead><tbody>
+      ${linhas}
+      </tbody></table><div class="empty" id="fvazio" hidden>Nenhuma empresa com esse filtro. <a href="#" id="flimpar">Limpar filtro</a></div>` : `<div class="empty">Nenhuma empresa ainda. <a href="#/empresa/novo?esc=${id}">Cadastre</a> ou importe sua planilha.</div>`}</div>`;
   } else if (aba === 'downloads') {
     const dls = await q(sb.from('downloads').select('*, empresas(razao_social)').eq('escritorio_id', id).order('atualizado_em', { ascending: false }).limit(100));
     corpo = `<div class="card tbl-wrap">${dls.length ? `<table class="tbl"><thead><tr><th>Quando</th><th>Empresa</th><th>Competência</th><th>Tipo</th><th class="c">Notas</th><th>Situação</th><th>Detalhe</th></tr></thead><tbody>
@@ -616,7 +874,7 @@ async function telaEscritorio(id, aba = 'empresas') {
         ${livres.length ? `<label class="f">Usuário<select id="livre">${livres.map(p => `<option value="${p.user_id}">${h(p.email)}</option>`).join('')}</select></label><button type="button" class="btn p" id="ligar">Ligar a ${h(es.nome)}</button>` : '<div class="sub">Nenhum usuário novo esperando.</div>'}
       </div></div>`;
   }
-  await layout(eAdmin() ? 'escritorios' : 'escritorios', `
+  await layout(vez, eAdmin() ? 'escritorios' : 'escritorios', `
     <div class="top">
       <div>
         ${eAdmin() ? `<div class="sub"><a href="#/escritorios">Escritórios</a> / ${h(es.nome)}</div>` : ''}
@@ -625,11 +883,11 @@ async function telaEscritorio(id, aba = 'empresas') {
       </div>
       <div class="filters">
         <label class="f">Competência<select id="comp">${compOpcoes()}</select></label>
-        <a class="btn" href="#/rotina/${id}" style="display:inline-flex;align-items:center;text-decoration:none">Rotina</a>
         ${seletorPc(es, pcs)}
-        <button type="button" class="btn" id="baixar">Baixar agora</button>
-        <a class="btn p" href="#/empresa/novo?esc=${id}" style="display:inline-flex;align-items:center;text-decoration:none">+ Nova empresa</a>
-        ${eAdmin() ? '<button type="button" class="btn" id="editarEsc">Editar escritório</button><button type="button" class="btn del-o" id="excluirEsc">Excluir escritório</button>' : ''}
+        <button type="button" class="btn p" id="baixar" title="Baixar as notas de todas as empresas deste escritório">▶ Baixar agora</button>
+        <a class="btn lk" href="#/rotina/${id}">Rotina</a>
+        <a class="btn lk" href="#/empresa/novo?esc=${id}">+ Nova empresa</a>
+        ${eAdmin() ? '<details class="mais"><summary class="btn">⋯ Mais</summary><div class="card mais-menu"><button type="button" id="editarEsc">Editar escritório</button><button type="button" id="excluirEsc" class="perigo">Excluir escritório</button></div></details>' : ''}
       </div>
     </div>
     <section class="kpis">
@@ -644,22 +902,44 @@ async function telaEscritorio(id, aba = 'empresas') {
       ${eAdmin() ? `<button type="button" class="tab ${aba === 'usuarios' ? 'on' : ''}" data-aba="usuarios">Usuários do escritório</button>` : ''}
     </div>
     ${corpo}`);
+  // A aba e o filtro vão para o endereço: F5 e o botão Voltar do navegador mantêm onde a pessoa estava.
+  const endereco = a => { const p = new URLSearchParams(); if (a !== 'empresas') p.set('aba', a); if (fe.chip !== 'todas') p.set('f', fe.chip);
+    const qs = p.toString(); history.replaceState(null, '', '#/escritorio/' + id + (qs ? '?' + qs : '')); };
   $('#comp').onchange = e => { st.comp = e.target.value; telaEscritorio(id, aba); };
-  $$('[data-aba]').forEach(t => t.onclick = () => telaEscritorio(id, t.dataset.aba));
-  $$('tr.click').forEach(tr => tr.onclick = () => go(tr.dataset.href));
+  $$('[data-aba]').forEach(t => t.onclick = () => { endereco(t.dataset.aba); telaEscritorio(id, t.dataset.aba); });
+  $$('tr.click').forEach(tr => tr.onclick = ev => { if (!ev.target.closest('a,button,input')) go(tr.dataset.href); });
+  const mais = $('details.mais'); if (mais) mais.querySelectorAll('button').forEach(x => x.addEventListener('click', () => { mais.open = false; }));
+  // Filtro na hora (sem buscar nada de novo): caixa de texto + botões com a contagem
+  const filtrar = () => {
+    const tab = $('#tabEmp'); if (!tab) return;
+    const t = semAcento(fe.q.trim()); let vis = 0;
+    for (const tr of tab.tBodies[0].rows) {
+      const ok = (fe.chip === 'todas' || (fe.chip === 'semmov' ? tr.dataset.sm === '1' : tr.dataset.k === fe.chip)) && (!t || tr.dataset.t.includes(t));
+      tr.hidden = !ok; if (ok) vis++;
+    }
+    $$('[data-chip]').forEach(c => c.classList.toggle('on', c.dataset.chip === fe.chip));
+    $('#fcont').textContent = vis === b.empresas.length ? '' : `mostrando ${vis} de ${b.empresas.length}`;
+    $('#fvazio').hidden = vis > 0; tab.hidden = !vis;
+  };
+  if ($('#fq')) {
+    $('#fq').oninput = e => { fe.q = e.target.value; filtrar(); atualizarSel(); };
+    $$('[data-chip]').forEach(c => c.onclick = () => { fe.chip = fe.chip === c.dataset.chip ? 'todas' : c.dataset.chip; endereco(aba); filtrar(); atualizarSel(); });
+    if ($('#flimpar')) $('#flimpar').onclick = ev => { ev.preventDefault(); fe.q = ''; fe.chip = 'todas'; $('#fq').value = ''; endereco(aba); filtrar(); atualizarSel(); };
+  }
+  ligarEntregas(b);
   ligarSeletorPc(id);
   $('#baixar').onclick = () => pedirExecucao(id);
   $$('[data-baixar-ie]').forEach(bt => bt.onclick = ev => { ev.stopPropagation(); pedirExecucao(id, bt.dataset.baixarIe); });
   // Selecionar algumas empresas e baixar só elas
-  const caixas = () => $$('.selEmp');
+  const caixas = () => $$('.selEmp').filter(cx => !cx.closest('tr').hidden);   // só as que estão aparecendo
   const atualizarSel = () => {
     const bar = $('#selbar'); if (!bar) return;
     bar.hidden = !sel.size;
     $('#selqtd').innerHTML = `<b>${sel.size}</b> ${sel.size === 1 ? 'empresa selecionada' : 'empresas selecionadas'}`;
-    const todas = $('#selTodas'), total = caixas().length;
-    if (todas) { todas.checked = !!total && sel.size === total; todas.indeterminate = sel.size > 0 && sel.size < total; }
+    const todas = $('#selTodas'), cx = caixas(), marc = cx.filter(x => x.checked).length;
+    if (todas) { todas.checked = !!cx.length && marc === cx.length; todas.indeterminate = marc > 0 && marc < cx.length; }
   };
-  caixas().forEach(cx => {
+  $$('.selEmp').forEach(cx => {
     cx.onclick = ev => ev.stopPropagation();
     cx.onchange = () => { cx.checked ? sel.add(cx.dataset.ie) : sel.delete(cx.dataset.ie); atualizarSel(); };
     cx.parentElement.onclick = ev => { ev.stopPropagation(); if (ev.target !== cx) { cx.checked = !cx.checked; cx.onchange(); } };
@@ -668,13 +948,42 @@ async function telaEscritorio(id, aba = 'empresas') {
     $('#selTodas').parentElement.onclick = ev => ev.stopPropagation();
     $('#selTodas').onchange = e => { caixas().forEach(cx => { cx.checked = e.target.checked; cx.checked ? sel.add(cx.dataset.ie) : sel.delete(cx.dataset.ie); }); atualizarSel(); };
   }
-  if ($('#limparSel')) $('#limparSel').onclick = () => { sel.clear(); caixas().forEach(cx => cx.checked = false); atualizarSel(); };
+  if ($('#limparSel')) $('#limparSel').onclick = () => { sel.clear(); $$('.selEmp').forEach(cx => cx.checked = false); atualizarSel(); };
+  const escolhidas = () => b.empresas.filter(e => e.ie && sel.has(e.ie));
+  // Marcar a mesma entrega em várias empresas de uma vez
+  if ($('#marcarSel')) $('#marcarSel').onclick = async () => {
+    const r = await new Promise(resolve => {
+      const fundo = document.createElement('div'); fundo.className = 'modal-fundo';
+      fundo.innerHTML = `<form class="card modal" role="dialog" aria-modal="true"><h2 style="font-size:18px">Marcar entrega em ${sel.size} ${sel.size === 1 ? 'empresa' : 'empresas'}</h2>
+        <div class="sub">Competência ${compNome(st.comp)}. Só muda nas empresas que têm essa obrigação no cadastro.</div>
+        <label class="f">Obrigação<select name="ob">${OBRIG.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+        <label class="f">Marcar como<select name="st"><option value="ok">OK (entregue)</option><option value="pendente">Pendente</option><option value="atrasado">Atraso</option><option value="na">N/A</option></select></label>
+        <div style="display:flex;gap:10px;justify-content:flex-end"><button type="button" class="btn" id="mcanc">Cancelar</button><button type="submit" class="btn p">Marcar</button></div></form>`;
+      document.body.appendChild(fundo);
+      const fechar = v => { fundo.remove(); resolve(v); };
+      fundo.querySelector('#mcanc').onclick = () => fechar(null);
+      fundo.onclick = e => { if (e.target === fundo) fechar(null); };
+      fundo.querySelector('form').onsubmit = e => { e.preventDefault(); const fd = new FormData(e.target); fechar({ ob: fd.get('ob'), st: fd.get('st') }); };
+    });
+    if (!r) return;
+    const alvo = escolhidas().filter(e => e.obrigacoes.includes(r.ob));
+    if (!alvo.length) return toast('Nenhuma das empresas escolhidas tem essa obrigação no cadastro.');
+    await q(sb.from('entregas').upsert(alvo.map(e => ({ empresa_id: e.id, competencia: st.comp, obrigacao: r.ob, status: r.st, atualizado_por: st.session.user.id, atualizado_em: new Date().toISOString() }))));
+    limparCache(); toast(`Entrega marcada em ${alvo.length} ${alvo.length === 1 ? 'empresa' : 'empresas'}.`); telaEscritorio(id, aba);
+  };
+  if ($('#exportarSel')) $('#exportarSel').onclick = async () => {
+    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
+    const dados = [['Código', 'Empresa', 'IE', 'CNPJ', 'Regime', 'Notas entrada', 'Notas saída', 'Download', ...OBRIG.map(x => x[1])],
+      ...escolhidas().map(e => [e.codigo || '', e.razao_social, e.ie || '', e.cnpj || '', REGIMES[e.regime] || '', qtd(b, e, 'entrada') ?? '', qtd(b, e, 'saida') ?? '', statusDownload(b, e)[1], ...OBRIG.map(([k]) => ST_ENT[statusEnt(b, e, k)][1])])];
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dados), 'Empresas');
+    XLSX.writeFile(wb, `empresas-${es.nome.replace(/[^\w]+/g, '-').toLowerCase()}-${st.comp.slice(0, 7)}.xlsx`);
+  };
   if ($('#baixarSel')) $('#baixarSel').onclick = async () => {
     const ies = [...sel]; if (!ies.length) return;
     await pedirExecucao(id, ies.join(','));
-    sel.clear(); caixas().forEach(cx => cx.checked = false); atualizarSel();
+    sel.clear(); $$('.selEmp').forEach(cx => cx.checked = false); atualizarSel();
   };
-  atualizarSel();
+  filtrar(); atualizarSel();
   if ($('#editarEsc')) $('#editarEsc').onclick = async () => {
     if (await editarEscritorio(es)) telaEscritorio(id, aba);
   };
@@ -682,7 +991,7 @@ async function telaEscritorio(id, aba = 'empresas') {
     const ok = await confirmarComSenha(`Excluir ${es.nome}?`, `Apaga o escritório, as ${b.empresas.length} empresas dele, o histórico de downloads, as entregas, os alertas e a senha da Sefaz. Não tem como desfazer. Os XMLs já salvos no computador continuam lá.`);
     if (!ok) return;
     await q(sb.from('escritorios').delete().eq('id', id));
-    toast('Escritório excluído.'); go('#/escritorios');
+    limparCache(); toast('Escritório excluído.'); go('#/escritorios');
   };
   if ($('#ligar')) $('#ligar').onclick = async () => {
     await q(sb.from('perfis').update({ escritorio_id: id }).eq('user_id', $('#livre').value));
@@ -696,6 +1005,7 @@ async function telaEscritorio(id, aba = 'empresas') {
 
 // ---------- empresa ----------
 async function telaEmpresa(id, params) {
+  const vez = ++st.vez;
   const nova = id === 'novo';
   const [empBanco, escs, rotinas] = await Promise.all([
     nova ? null : q(sb.from('empresas').select('*').eq('id', id).maybeSingle()),
@@ -707,7 +1017,7 @@ async function telaEmpresa(id, params) {
   const es = escs.find(e => e.id === emp.escritorio_id);
   const rot = rotinas.find(r => r.escritorio_id === emp.escritorio_id);
   const sel = (v, a) => v === a ? 'selected' : '';
-  await layout('escritorios', `
+  await layout(vez, 'escritorios', `
     <div class="top"><div><div class="sub"><a href="#/escritorio/${emp.escritorio_id}">${h(es?.nome || 'Escritório')}</a> / ${nova ? 'Nova empresa' : h(emp.razao_social)}</div><h1>${nova ? 'Cadastrar empresa' : 'Editar empresa'}</h1></div></div>
     <div class="cols form">
       <form id="f" style="display:flex;flex-direction:column;gap:20px">
@@ -743,7 +1053,7 @@ async function telaEmpresa(id, params) {
         </section>
         <div style="display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap">
           <div style="display:flex;gap:10px;flex-wrap:wrap">${nova ? '' : '<button type="button" class="btn" id="desativar">Desativar</button><button type="button" class="btn del-o" id="excluirEmp">Excluir empresa</button>'}</div>
-          <div style="display:flex;gap:10px"><a class="btn" href="#/escritorio/${emp.escritorio_id}" style="display:inline-flex;align-items:center;text-decoration:none">Cancelar</a><button class="btn p" type="submit">Salvar empresa</button></div>
+          <div style="display:flex;gap:10px"><a class="btn lk" href="#/escritorio/${emp.escritorio_id}" >Cancelar</a><button class="btn p" type="submit">Salvar empresa</button></div>
         </div>
       </form>
       <aside class="card pad" style="display:flex;flex-direction:column;gap:14px">
@@ -766,17 +1076,17 @@ async function telaEmpresa(id, params) {
       pasta: (fd.get('pasta') || '').trim().replace(/[\\/]+$/, '') || null,
     };
     if (nova) await q(sb.from('empresas').insert(reg)); else await q(sb.from('empresas').update(reg).eq('id', id));
-    toast('Empresa salva.'); go('#/escritorio/' + reg.escritorio_id);
+    limparCache(); toast('Empresa salva.'); go('#/escritorio/' + reg.escritorio_id);
   };
   if ($('#excluirEmp')) $('#excluirEmp').onclick = async () => {
     const ok = await confirmarComSenha(`Excluir ${emp.razao_social}?`, 'Apaga a empresa, o histórico de downloads e as entregas dela. Não tem como desfazer. Se for só parar de baixar, use Desativar.');
     if (!ok) return;
     await q(sb.from('empresas').delete().eq('id', id));
-    toast('Empresa excluída.'); go('#/escritorio/' + emp.escritorio_id);
+    limparCache(); toast('Empresa excluída.'); go('#/escritorio/' + emp.escritorio_id);
   };
   if ($('#desativar')) $('#desativar').onclick = async () => {
     if (!confirm('Desativar esta empresa? Ela some dos painéis e o robô para de baixar.')) return;
-    await q(sb.from('empresas').update({ ativa: false }).eq('id', id)); go('#/escritorio/' + emp.escritorio_id);
+    await q(sb.from('empresas').update({ ativa: false }).eq('id', id)); limparCache(); go('#/escritorio/' + emp.escritorio_id);
   };
   $('#arq').onchange = e => importarPlanilha(e.target.files[0], emp.escritorio_id);
 }
@@ -803,11 +1113,12 @@ async function importarPlanilha(arq, escritorioId) {
   if (!regs.length) return $('#imp').textContent = 'Nenhuma empresa encontrada na planilha.';
   if (!confirm(`Importar ${regs.length} empresas para este escritório?`)) return;
   await q(sb.from('empresas').insert(regs));
-  toast(`${regs.length} empresas importadas.`); go('#/escritorio/' + escritorioId);
+  limparCache(); st.indice = null; toast(`${regs.length} empresas importadas.`); go('#/escritorio/' + escritorioId);
 }
 
 // ---------- alertas ----------
 async function telaAlertas(f = { aba: 'abertos', tipo: '', esc: '' }) {
+  const vez = ++st.vez;
   let qr = sb.from('alertas').select('*, escritorios(nome), empresas(razao_social)').order('criado_em', { ascending: false }).limit(200);
   if (f.aba === 'abertos') qr = qr.is('resolvido_em', null);
   if (f.aba === 'resolvidos') qr = qr.not('resolvido_em', 'is', null);
@@ -821,14 +1132,15 @@ async function telaAlertas(f = { aba: 'abertos', tipo: '', esc: '' }) {
   ]);
   const cnt = t => abertos.filter(a => a.tipo === t).length;
   const TAG = { erro: ['er', 'ERRO'], mudanca: ['mu', 'MUDANÇA'], aviso: ['pe', 'AVISO'] };
-  const ACAO = { atualizar_senha: 'Atualizar senha', tentar_de_novo: 'Tentar de novo', baixar_novas: 'Baixar as novas' };
-  await layout('alertas', `
+  const ACAO = ACAO_ALERTA;
+  st.reexibir = () => telaAlertas(f);
+  await layout(vez, 'alertas', `
     <div class="top"><div><div class="sub">Erros e mudanças de qualquer empresa${eAdmin() ? ', de todos os escritórios' : ''}</div><h1>Alertas</h1></div></div>
     <section class="kpis">
-      <div class="card pad kpi"><div class="l" style="color:#9B1C12;font-weight:600">Erros</div><div class="v">${cnt('erro')}</div><div class="sub">precisam de ação</div></div>
+      <div class="card pad kpi"><div class="l" style="color:var(--err-t);font-weight:600">Erros</div><div class="v">${cnt('erro')}</div><div class="sub">precisam de ação</div></div>
       <div class="card pad kpi"><div class="l" style="color:var(--navy);font-weight:600">Mudanças</div><div class="v">${cnt('mudanca')}</div><div class="sub">notas ou cadastro alterados</div></div>
-      <div class="card pad kpi"><div class="l" style="color:#6B4A00;font-weight:600">Avisos</div><div class="v">${cnt('aviso')}</div><div class="sub">vale conferir</div></div>
-      <div class="card pad kpi"><div class="l" style="color:#10592F;font-weight:600">Resolvidos hoje</div><div class="v">${resolvHoje.count || 0}</div></div>
+      <div class="card pad kpi"><div class="l" style="color:var(--warn-t);font-weight:600">Avisos</div><div class="v">${cnt('aviso')}</div><div class="sub">vale conferir</div></div>
+      <div class="card pad kpi"><div class="l" style="color:var(--ok-t);font-weight:600">Resolvidos hoje</div><div class="v">${resolvHoje.count || 0}</div></div>
     </section>
     <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--line)">
       <div style="display:flex;gap:4px">${[['abertos', `Abertos (${abertos.length})`], ['resolvidos', 'Resolvidos'], ['todos', 'Todos']].map(([k, l]) => `<button type="button" class="tab ${f.aba === k ? 'on' : ''}" data-aba="${k}" style="border-bottom-width:2px">${l}</button>`).join('')}</div>
@@ -848,20 +1160,12 @@ async function telaAlertas(f = { aba: 'abertos', tipo: '', esc: '' }) {
   const rec = (mud = {}) => telaAlertas({ aba: f.aba, tipo: $('#ftipo').value, esc: $('#fesc')?.value || '', ...mud });
   $$('[data-aba]').forEach(t => t.onclick = () => rec({ aba: t.dataset.aba }));
   $('#ftipo').onchange = () => rec(); if ($('#fesc')) $('#fesc').onchange = () => rec();
-  $$('[data-resolver]').forEach(bt => bt.onclick = async () => {
-    await q(sb.from('alertas').update({ resolvido_em: new Date().toISOString(), resolvido_por: st.session.user.id }).eq('id', bt.dataset.resolver));
-    rec();
-  });
-  $$('[data-acao]').forEach(bt => bt.onclick = async () => {
-    if (bt.dataset.acao === 'atualizar_senha') return go('#/acesso?esc=' + bt.dataset.esc);
-    await pedirExecucao(bt.dataset.esc);
-    await q(sb.from('alertas').update({ resolvido_em: new Date().toISOString(), resolvido_por: st.session.user.id }).eq('id', bt.dataset.id));
-    rec();
-  });
+  ligarAlertas(() => rec());
 }
 
 // ---------- acesso à Sefaz ----------
 async function telaAcesso(params) {
+  const vez = ++st.vez;
   const [escs, creds, pcs] = await Promise.all([
     q(sb.from('escritorios').select('id,nome').order('nome')),
     q(sb.from('credenciais_sefaz').select('*')),
@@ -870,11 +1174,11 @@ async function telaAcesso(params) {
   const cm = Object.fromEntries(creds.map(c => [c.escritorio_id, c]));
   const selId = params.get('esc') || (eAdmin() ? escs[0]?.id : st.perfil.escritorio_id);
   const es = escs.find(e => e.id === selId); const c = cm[selId];
-  await layout('acesso', `
+  await layout(vez, 'acesso', `
     <div class="top"><div><div class="sub">Login do contador usado pelo robô, um por escritório</div><h1>Acesso à Sefaz-GO</h1></div></div>
     <div class="cols form">
       <section class="card tbl-wrap">${escs.length ? `<table class="tbl"><thead><tr><th>Escritório</th><th>Contador</th><th>CPF</th><th>Situação</th><th>Último teste</th><th>Senha alterada</th></tr></thead><tbody>
-        ${escs.map(e => { const x = cm[e.id]; return `<tr class="click" data-href="#/acesso?esc=${e.id}" style="${e.id === selId ? 'background:#F6EFD9' : ''}"><td style="font-weight:600">${h(e.nome)}</td><td>${h(x?.nome_contador || '—')}</td><td>${x ? mascCpf(x.cpf) : '—'}</td>
+        ${escs.map(e => { const x = cm[e.id]; return `<tr class="click ${e.id === selId ? 'sel-row' : ''}" data-href="#/acesso?esc=${e.id}"><td style="font-weight:600">${h(e.nome)}</td><td>${h(x?.nome_contador || '—')}</td><td>${x ? mascCpf(x.cpf) : '—'}</td>
           <td>${pillSefaz(x?.situacao)}</td><td>${quando(x?.ultimo_teste)}</td><td>${x?.alterada_em ? new Date(x.alterada_em).toLocaleDateString('pt-BR') : '—'}</td></tr>`; }).join('')}
       </tbody></table>` : '<div class="empty">Cadastre um escritório primeiro.</div>'}</section>
       ${es ? `<form class="card pad" id="f" style="display:flex;flex-direction:column;gap:14px">
@@ -982,6 +1286,7 @@ function pedirLoginExtensao(atual) {
 }
 const dataBr = d => new Date(d + 'T12:00').toLocaleDateString('pt-BR');
 async function telaAtualizacoes() {
+  const vez = ++st.vez;
   if (!eAdmin()) return go('#/');
   const [vers, pcs, logins] = await Promise.all([
     q(sb.from('extensao_versoes').select('*')),
@@ -994,7 +1299,7 @@ async function telaAtualizacoes() {
   const minhaExt = document.documentElement.dataset.automacaoNotas;   // versão da extensão neste Chrome (painel.js)
   const esteAtras = !!(princ && minhaExt && cmpVer(minhaExt, princ.versao) < 0);
   const outrosAtras = atras.filter(p => p.id !== meuPc());   // este computador já aparece na frase de cima
-  await layout('atualizacoes', `
+  await layout(vez, 'atualizacoes', `
     <div class="top"><div><div class="sub">Baixe a extensão do Chrome em qualquer computador</div><h1>Atualizações</h1></div></div>
     ${princ ? `<section class="card pad" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
       <div style="width:52px;height:52px;border-radius:10px;background:var(--navy);display:flex;align-items:center;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg></div>
@@ -1096,6 +1401,7 @@ async function telaRemovida(params) {
 
 // ---------- rotina ----------
 async function telaRotina(id) {
+  const vez = ++st.vez;
   const [es, rot, exes, pcs] = await Promise.all([
     q(sb.from('escritorios').select('id,nome,pc_padrao').eq('id', id).maybeSingle()),
     q(sb.from('rotinas').select('*').eq('escritorio_id', id).maybeSingle()),
@@ -1108,7 +1414,7 @@ async function telaRotina(id) {
   const dls = ult ? await todos(() => sb.from('downloads').select('*, empresas(razao_social,ie)').eq('execucao_id', ult.id).order('empresa_id').order('id')) : [];
   const nomePc = pcs.find(p => p.id === ult?.pc_id)?.nome;
   const EXE = { pendente: ['pe', 'Aguardando robô'], aguardando_pc: ['pe', 'Aguardando o ' + (nomePc || 'computador escolhido')], rodando: ['pe', nomePc ? 'Rodando no ' + nomePc : 'Rodando'], concluida: ['ok', 'Concluída'], com_erros: ['pe', 'Concluída com erros'], falhou: ['er', 'Falhou'] };
-  await layout('rotina', `
+  await layout(vez, 'rotina', `
     <div class="top"><div><div class="sub"><a href="#/escritorio/${id}">${h(es.nome)}</a></div><h1>Rotina automática</h1></div><div class="filters">${seletorPc(es, pcs)}</div></div>
     <form id="f" class="cols" style="grid-template-columns:1fr 1fr">
       <section class="card pad" style="display:flex;flex-direction:column;gap:16px">
@@ -1193,8 +1499,9 @@ async function telaRotina(id) {
 }
 
 function naoEncontrado(titulo, texto) {
-  return layout('', `<div class="card pad" style="max-width:520px;display:flex;flex-direction:column;gap:12px"><h2>${h(titulo)}</h2><div class="sub">${h(texto)}</div>
-    <a class="btn p" href="${eAdmin() ? '#/escritorios' : '#/'}" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none">Voltar</a></div>`);
+  const vez = ++st.vez;
+  return layout(vez, '', `<div class="card pad" style="max-width:520px;display:flex;flex-direction:column;gap:12px"><h2>${h(titulo)}</h2><div class="sub">${h(texto)}</div>
+    <a class="btn p lk" href="${eAdmin() ? '#/escritorios' : '#/'}" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none">Voltar</a></div>`);
 }
 
 // ---------- roteador ----------
@@ -1211,15 +1518,16 @@ async function rota() {
     $('#sair').onclick = () => sb.auth.signOut(); return;
   }
   carregarMenu();
+  st.reexibir = null;
   mostrarCarregando();
   const [path, qs] = (location.hash.slice(1) || '/').split('?');
   const params = new URLSearchParams(qs || '');
   const p = path.split('/').filter(Boolean);
   try {
     if (!p.length) return await telaPainel();
-    if (p[0] === 'entregas') return await telaEntregas();
+    if (p[0] === 'entregas') return await telaEntregas({ esc: params.get('esc') || '', mostrar: params.get('mostrar') || 'todas', busca: params.get('busca') || '' });
     if (p[0] === 'escritorios') return await telaEscritorios();
-    if (p[0] === 'escritorio' && p[1]) return await telaEscritorio(p[1]);
+    if (p[0] === 'escritorio' && p[1]) { if (params.has('f')) (st.fEsc[p[1]] = st.fEsc[p[1]] || { q: '' }).chip = params.get('f'); return await telaEscritorio(p[1], params.get('aba') || 'empresas'); }
     if (p[0] === 'empresa' && p[1]) return await telaEmpresa(p[1], params);
     if (p[0] === 'alertas') return await telaAlertas();
     if (p[0] === 'acesso') return await telaAcesso(params);
@@ -1227,6 +1535,7 @@ async function rota() {
     if (p[0] === 'rotina' && p[1]) return await telaRotina(p[1]);
     go('#/');
   } catch (e) {
+    if (e === CANCELADA) return;
     console.error(e);
     try { await naoEncontrado('Não foi possível abrir esta tela', 'Erro: ' + (e?.message || e) + ' · tela: ' + location.hash); } catch (_) {}
   }
@@ -1238,6 +1547,7 @@ sb.auth.onAuthStateChange((evento, session) => {
   if (!session) st.perfil = null;
   if (evento === 'PASSWORD_RECOVERY') return setTimeout(telaNovaSenha, 0);
   // setTimeout: não chamar o Supabase de dentro do próprio callback (evita travar)
+  if (evento === 'SIGNED_IN' && st.perfil && st.perfil.user_id === session?.user?.id && root.querySelector('.app')) return;   // voltar para a aba não recarrega a tela
   if (st.reautenticando && evento === 'SIGNED_IN') return; // conferência de senha na exclusão: não recarrega a tela
   if (['INITIAL_SESSION', 'SIGNED_IN', 'SIGNED_OUT'].includes(evento)) setTimeout(rota, 0);
 });
