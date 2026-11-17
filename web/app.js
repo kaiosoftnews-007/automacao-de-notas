@@ -357,7 +357,7 @@ function ligarAlertas(depois) {
     carregarMenu(true); depois();
   });
   $$('[data-acao]').forEach(bt => bt.onclick = async () => {
-    if (bt.dataset.acao === 'atualizar_senha') return go('#/acesso?esc=' + bt.dataset.esc);
+    if (bt.dataset.acao === 'atualizar_senha') return go('#/acesso?esc=' + bt.dataset.esc + '&cont=padrao');
     await pedirExecucao(bt.dataset.esc);
     await q(sb.from('alertas').update({ resolvido_em: new Date().toISOString(), resolvido_por: st.session.user.id }).eq('id', bt.dataset.id));
     carregarMenu(true); depois();
@@ -1216,57 +1216,63 @@ async function telaAlertas(f = { aba: 'abertos', tipo: '', esc: '' }) {
 // ---------- acesso à Sefaz ----------
 async function telaAcesso(params) {
   const vez = ++st.vez;
-  const [escs, creds, pcs] = await Promise.all([
+  const [escs, creds, pcs, todosCont] = await Promise.all([
     q(sb.from('escritorios').select('id,nome').order('nome')),
     q(sb.from('credenciais_sefaz').select('*')),
     carregarPcs(),
+    sb.from('contadores').select('escritorio_id').then(r => r.data || []),
   ]);
   const cm = Object.fromEntries(creds.map(c => [c.escritorio_id, c]));
+  const nCont = {}; for (const x of todosCont) nCont[x.escritorio_id] = (nCont[x.escritorio_id] || 0) + 1;
   const selId = params.get('esc') || (eAdmin() ? escs[0]?.id : st.perfil.escritorio_id);
   const es = escs.find(e => e.id === selId); const c = cm[selId];
-  const [conts, empsCont] = es ? await Promise.all([carregarContadores(selId),
-    sb.from('empresas').select('contador_id').eq('escritorio_id', selId).eq('ativa', true).not('contador_id', 'is', null).then(r => r.data || [])]) : [null, []];
-  const nEmp = {}; for (const e of empsCont) nEmp[e.contador_id] = (nEmp[e.contador_id] || 0) + 1;
+  const [conts, empsEsc] = es ? await Promise.all([carregarContadores(selId),
+    sb.from('empresas').select('contador_id').eq('escritorio_id', selId).eq('ativa', true).then(r => r.data || [])]) : [null, []];
+  const nEmp = {}; let semCont = 0;
+  for (const e of empsEsc) { if (e.contador_id) nEmp[e.contador_id] = (nEmp[e.contador_id] || 0) + 1; else semCont++; }
   const contId = params.get('cont');
-  const ct = contId === 'novo' ? {} : conts?.find(x => x.id === contId) || null;
   const qsCont = v => `#/acesso?esc=${selId}&cont=${v}`;
+  const ePadrao = contId === 'padrao';
+  const ct = !conts || ePadrao ? null : contId === 'novo' ? {} : conts.find(x => x.id === contId) || null;
+  const cab = (t, nome) => `<div><div class="sub" style="text-transform:uppercase;letter-spacing:.06em;font-weight:600">${t} · ${h(es.nome)}</div><h2 style="font-size:18px;margin-top:4px">${nome}</h2></div>`;
+  const cancelar = '<button type="button" class="btn" data-cancelar>Cancelar</button>';
   await layout(vez, 'acesso', `
     <div class="top"><div><div class="sub">Login do contador usado pelo robô, um por escritório</div><h1>Acesso à Sefaz-GO</h1></div></div>
-    <div class="cols form">
-      <section class="card tbl-wrap">${escs.length ? `<table class="tbl"><thead><tr><th>Escritório</th><th>Contador</th><th>CPF</th><th>Situação</th><th>Último teste</th><th>Senha alterada</th></tr></thead><tbody>
-        ${escs.map(e => { const x = cm[e.id]; return `<tr class="click ${e.id === selId ? 'sel-row' : ''}" data-href="#/acesso?esc=${e.id}"><td style="font-weight:600">${h(e.nome)}</td><td>${h(x?.nome_contador || '—')}</td><td>${x ? mascCpf(x.cpf) : '—'}</td>
-          <td>${pillSefaz(x?.situacao)}</td><td>${quando(x?.ultimo_teste)}</td><td>${x?.alterada_em ? new Date(x.alterada_em).toLocaleDateString('pt-BR') : '—'}</td></tr>`; }).join('')}
-      </tbody></table>` : '<div class="empty">Cadastre um escritório primeiro.</div>'}</section>
-      ${es ? `<form class="card pad" id="f" style="display:flex;flex-direction:column;gap:14px">
-        <div><div class="sub" style="text-transform:uppercase;letter-spacing:.06em;font-weight:600">Editando</div><h2 style="font-size:18px;margin-top:4px">${h(es.nome)}</h2></div>
+    <section class="card tbl-wrap">${escs.length ? `<table class="tbl"><thead><tr><th>Escritório</th><th>Contador padrão</th><th>CPF</th><th class="c">Contadores</th><th>Situação</th><th>Último teste</th><th>Senha alterada</th></tr></thead><tbody>
+      ${escs.map(e => { const x = cm[e.id]; return `<tr class="click ${e.id === selId ? 'sel-row' : ''}" data-href="#/acesso?esc=${e.id}"><td style="font-weight:600">${h(e.nome)}</td><td>${h(x?.nome_contador || '—')}</td><td>${x ? mascCpf(x.cpf) : '—'}</td>
+        <td class="c">${(x ? 1 : 0) + (nCont[e.id] || 0)}</td><td>${pillSefaz(x?.situacao)}</td><td>${quando(x?.ultimo_teste)}</td><td>${x?.alterada_em ? new Date(x.alterada_em).toLocaleDateString('pt-BR') : '—'}</td></tr>`; }).join('')}
+    </tbody></table>` : '<div class="empty">Cadastre um escritório primeiro.</div>'}</section>
+    ${es ? `<div class="cols form" id="contadores">
+      <section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Contadores do escritório ${h(es.nome)}</h2><div class="sub" style="margin-top:4px">Cada empresa baixa com o login do seu contador (escolhido no cadastro da empresa). Empresas sem contador usam o login padrão do escritório.</div></div>
+        <table class="tbl"><thead><tr><th>Contador</th><th>CPF</th><th class="c">Empresas</th><th>Situação</th><th>Último teste</th><th></th></tr></thead><tbody>
+        <tr class="click ${ePadrao ? 'sel-row' : ''}" data-href="${qsCont('padrao')}"><td style="font-weight:600">${h(c?.nome_contador || (c ? 'Login do escritório' : 'Login padrão não cadastrado'))} <span class="pill na" style="margin-left:6px">Padrão do escritório</span></td>
+          <td>${c ? mascCpf(c.cpf) : '—'}</td><td class="c">${semCont}${conts?.length ? ' sem contador' : ''}</td><td>${pillSefaz(c?.situacao)}</td><td>${quando(c?.ultimo_teste)}</td>
+          <td style="text-align:right"><a class="btn s lk" href="${qsCont('padrao')}">${c ? 'Editar' : 'Cadastrar'}</a></td></tr>
+        ${(conts || []).map(x => `<tr class="click ${ct?.id === x.id ? 'sel-row' : ''}" data-href="${qsCont(x.id)}"><td style="font-weight:600">${h(x.nome)}</td><td>${x.cpf ? mascCpf(x.cpf) : '—'}</td><td class="c">${nEmp[x.id] || 0}</td>
+          <td>${pillContador(x)}</td><td>${quando(x.ultimo_teste)}</td><td style="text-align:right"><a class="btn s lk" href="${qsCont(x.id)}">Editar</a></td></tr>`).join('')}
+        </tbody></table>
+        ${conts ? `<div class="pad" style="padding-top:12px"><a class="btn o s lk" href="${qsCont('novo')}">+ Novo contador</a></div>` : ''}</section>
+      ${ePadrao ? `<form class="card pad" id="f" style="display:flex;flex-direction:column;gap:12px">
+        ${cab(c ? 'Editando login padrão' : 'Cadastrar login padrão', h(c?.nome_contador || 'Login do escritório'))}
         ${c?.situacao === 'recusada' ? `<div class="msg err">A Sefaz recusou a senha ${quando(c.ultimo_teste)}. Se ela mudou, atualize aqui.</div>` : ''}
         <label class="f">Nome do contador<input name="nome" value="${h(c?.nome_contador)}"></label>
         <label class="f">CPF do contador<input name="cpf" required inputmode="numeric" value="${h(c?.cpf)}"></label>
         <label class="f">${c?.senha_secret_id ? 'Nova senha da Sefaz' : 'Senha da Sefaz'}<input name="senha" type="password" autocomplete="new-password" ${c?.senha_secret_id ? 'placeholder="Deixe em branco para manter a atual"' : 'required'}></label>
         <label class="chk"><input type="checkbox" id="ver">Mostrar senha</label>
         <label class="chk"><input type="checkbox" name="rodar" checked>Ao salvar, já rodar os downloads</label>
-        <button class="btn p" type="submit">Salvar</button>
+        <button class="btn p" type="submit">Salvar</button>${cancelar}
         <div class="sub">A senha fica guardada criptografada. Depois de salva, ninguém consegue ver, só trocar.${c?.alterada_em ? `<br>Última alteração: ${new Date(c.alterada_em).toLocaleDateString('pt-BR')}` : ''}</div>
-      </form>` : ''}
-    </div>
-    ${conts ? `<div class="cols form" id="contadores">
-      <section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Contadores do escritório ${h(es.nome)}</h2><div class="sub" style="margin-top:4px">Cada empresa baixa com o login do seu contador (escolhido no cadastro da empresa). Empresas sem contador usam o login do escritório, acima.</div></div>
-        ${conts.length ? `<table class="tbl"><thead><tr><th>Contador</th><th>CPF</th><th class="c">Empresas</th><th>Situação</th><th>Último teste</th><th></th></tr></thead><tbody>
-        ${conts.map(x => `<tr class="click ${ct?.id === x.id ? 'sel-row' : ''}" data-href="${qsCont(x.id)}"><td style="font-weight:600">${h(x.nome)}</td><td>${x.cpf ? mascCpf(x.cpf) : '—'}</td><td class="c">${nEmp[x.id] || 0}</td>
-          <td>${pillContador(x)}</td><td>${quando(x.ultimo_teste)}</td><td style="text-align:right"><a class="btn s lk" href="${qsCont(x.id)}">Editar</a></td></tr>`).join('')}
-        </tbody></table>` : '<div class="empty">Nenhum contador ainda. Só precisa se cada empresa usar o login de um contador diferente.</div>'}
-        <div class="pad" style="padding-top:12px"><a class="btn o s lk" href="${qsCont('novo')}">+ Novo contador</a></div></section>
-      ${ct ? `<form class="card pad" id="fc" style="display:flex;flex-direction:column;gap:12px">
-        <div><div class="sub" style="text-transform:uppercase;letter-spacing:.06em;font-weight:600">${ct.id ? 'Editando contador' : 'Novo contador'} · ${h(es.nome)}</div><h2 style="font-size:18px;margin-top:4px">${ct.id ? h(ct.nome) : 'Cadastrar contador'}</h2></div>
+      </form>` : ct ? `<form class="card pad" id="fc" style="display:flex;flex-direction:column;gap:12px">
+        ${cab(ct.id ? 'Editando contador' : 'Novo contador', ct.id ? h(ct.nome) : 'Cadastrar contador')}
         ${ct.situacao === 'recusada' ? `<div class="msg err">A Sefaz recusou a senha ${quando(ct.ultimo_teste)}. Se ela mudou, atualize aqui.</div>` : ''}
         <label class="f">Nome<input name="nome" required value="${h(ct.nome)}"></label>
         <label class="f">CPF<input name="cpf" required inputmode="numeric" value="${h(ct.cpf)}" placeholder="000.000.000-00"></label>
         <label class="f">${ct.senha_secret_id ? 'Nova senha da Sefaz' : 'Senha da Sefaz'}<input name="senha" type="password" autocomplete="new-password" ${ct.senha_secret_id ? 'placeholder="Deixe em branco para manter a atual"' : 'required'}></label>
         <label class="chk"><input type="checkbox" id="verc">Mostrar senha</label>
-        <button class="btn p" type="submit">Salvar contador</button>
+        <button class="btn p" type="submit">Salvar contador</button>${cancelar}
         ${ct.id ? `<button type="button" class="btn del-o" id="excluirCont">Excluir contador</button>` : ''}
         <div class="sub">A senha fica criptografada. Depois de salva, ninguém consegue ver, só trocar.</div>
-      </form>` : '<div class="card pad sub">Clique em um contador para cadastrar o CPF e a senha da Sefaz dele.</div>'}
+      </form>` : '<div class="card pad sub">Clique em <b>Editar</b> no contador que quer alterar (CPF e senha da Sefaz).</div>'}
     </div>` : ''}
     ${pcs.length ? `<section class="card tbl-wrap"><div class="pad" style="padding-bottom:8px"><h2>Computadores com a extensão</h2><div class="sub" style="margin-top:4px">Aparecem em "Baixar em". Exclua os que não usa mais. Ao remover a extensão do Chrome (versão 3.8.1 ou mais nova), o computador sai daqui sozinho.</div></div>
       <table class="tbl"><thead><tr><th>Computador</th><th>Situação</th><th>Último sinal</th><th>Versão</th><th></th></tr></thead><tbody>
@@ -1276,6 +1282,7 @@ async function telaAcesso(params) {
         <td style="text-align:right">${eAdmin() ? `<button type="button" class="btn s del-o" data-tirar-pc="${p.id}">Excluir</button>` : ''}</td></tr>`).join('')}
       </tbody></table></section>` : ''}`);
   $$('tr.click').forEach(tr => tr.onclick = () => go(tr.dataset.href));
+  $$('[data-cancelar]').forEach(bt => bt.onclick = () => go('#/acesso?esc=' + selId));
   $$('[data-tirar-pc]').forEach(bt => bt.onclick = async () => {
     if (await excluirPc(pcs.find(p => p.id === bt.dataset.tirarPc))) telaAcesso(params);
   });
