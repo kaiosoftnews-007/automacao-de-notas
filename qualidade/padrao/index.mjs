@@ -34,6 +34,7 @@ const testFiles = [
 ];
 
 const ignoradosPadrao = [
+  "qualidade/**",
   ".claude/**",
   ".github/**",
   ".wrangler/**",
@@ -99,7 +100,12 @@ export async function criarConfig(opcoes = {}) {
 
   if (typescript) {
     const { default: tseslint } = await import("typescript-eslint");
-    config.push(...tseslint.configs.recommended);
+    config.push(...tseslint.configs.recommended, {
+      // Em TS o próprio compilador já acusa nomes não definidos; no-undef
+      // só gera falso positivo com tipos globais (recomendação do typescript-eslint).
+      files: ["**/*.{ts,tsx,mts,cts}"],
+      rules: { "no-undef": "off" },
+    });
   }
 
   const regrasQualidade = {
