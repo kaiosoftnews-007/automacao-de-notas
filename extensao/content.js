@@ -108,7 +108,7 @@
       const ie = ies.join(', ');
       const filtroIe = ies.length > 1 ? `&ie=in.(${ies.join(',')})` : ies.length ? `&ie=eq.${ies[0]}` : '';
       // 3.12.0: na ordem do contador (um login na Sefaz por contador); sem a coluna contador_id (banco antigo), como antes.
-      const base = `escritorio_id=eq.${escritorio.id}&ativa=eq.true&ie=not.is.null${filtroIe}`;
+      const base = `escritorio_id=eq.${escritorio.id}&ativa=eq.true&uf=neq.DF&ie=not.is.null${filtroIe}`;   // 3.13.0: DF vai pelo Agênci@Net
       const emps = await bg({ tipo: 'api', caminho: `empresas?select=*,contadores(nome)&${base}&order=contador_id.asc.nullsfirst,razao_social.asc` })
         .catch(() => bg({ tipo: 'api', caminho: `empresas?select=*&${base}&order=razao_social` }));
       const rot = (await bg({ tipo: 'api', caminho: `rotinas?select=periodo,pasta_destino&escritorio_id=eq.${escritorio.id}` }))[0];

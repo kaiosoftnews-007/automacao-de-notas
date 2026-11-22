@@ -182,6 +182,7 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
     }
     if (m.tipo === 'verificacaoOk') { marcarVerificacao(false); await limparAlerta(); return true; }
     if (m.tipo === 'irVerificacao') { await irParaSefaz(); return true; }
+    if (m.tipo?.startsWith('df')) return mensagemDf(m, remetente);
     if (m.tipo === 'avisar') return chrome.notifications.create({ type: 'basic', iconUrl: 'icone.png', title: 'Automação de Notas', message: m.texto });
   })().then(ok => responder({ ok }), e => responder({ erro: e.message }));
   return true;
@@ -244,6 +245,10 @@ chrome.runtime.onInstalled.addListener(async () => {
 const SEFAZ_INICIO = 'https://portal.sefaz.go.gov.br/portalsefaz-apps/';
 
 async function executar(m) {
+  // 3.13.0: empresas DF (por CNPJ) vão para o Agênci@Net; as de Goiás seguem o caminho de sempre.
+  const { go, df } = await separarUf(m).catch(() => ({ go: 1, df: [] }));
+  if (df.length) await solicitarDf(m, df, !go);
+  if (!go && df.length) return true;
   await set({ pedido: { escritorio_id: m.escritorio_id, execucao_id: m.execucao_id, ie: m.ie || null, comp: m.comp || null, em: Date.now() } });
   // Abre a Sefaz numa aba em segundo plano: você continua na página em que está.
   if (!m.abriu) {
@@ -364,7 +369,7 @@ function mudarZips(fn) {
     .catch(e => console.warn('zips:', e.message));
   return filaZips;
 }
-const marcarDl = (dl, corpo) => api({ metodo: 'PATCH', caminho: `downloads?id=eq.${dl}`, corpo: { ...corpo, atualizado_em: new Date().toISOString() } });
+const marcarDl = (dl, corpo) => api({ metodo: 'PATCH', caminho: `downloads?id=eq.${String(dl).split(':')[0]}`, corpo: { ...corpo, atualizado_em: new Date().toISOString() } });
 
 async function baixou(z, dl) { z[dl].fim = Date.now(); await marcarDl(dl, { status: 'processando', mensagem: MSG_MOVENDO }); }
 
@@ -391,7 +396,7 @@ function conferirZips() {
         }
         continue;
       }
-      if (!item || !item.exists) { await marcarDl(dl, { status: 'concluido', mensagem: null }); delete z[dl]; continue; }   // saiu de _organizar: chegou na pasta
+      if (!item || !item.exists) { if (!(await dfPendente(dl))) await marcarDl(dl, { status: 'concluido', mensagem: null }); delete z[dl]; continue; }   // saiu de _organizar: chegou na pasta
       if (!e.avisado && Date.now() - e.fim > 10 * 60e3) { await marcarDl(dl, { status: 'erro', mensagem: MSG_PARADO }); e.avisado = true; }
       if (Date.now() - e.fim > 7 * 24 * 3600e3) delete z[dl];
     }
@@ -407,3 +412,216 @@ conferirZips();
 async function textoAtualizacao() { return null; }
 function abrirAtualizar() { return chrome.tabs.create({ url: chrome.runtime.getURL('atualizar.html') }).then(() => 'Abrindo a página de atualização da extensão…'); }
 chrome.storage.local.remove('atu'); chrome.alarms.clear('atualizacao');
+
+
+// ================= 3.13.0: Sefaz DF (Agênci@Net / DEC, acesso por certificado) =================
+// O pedido do painel separa as empresas por UF. As do DF (pelo CNPJ) viram 4 pedidos cada
+// (NF-e/NFC-e × Emitente/Destinatário, conforme o cadastro) na fila do DEC. O DF demora (até 2 dias)
+// para liberar: a cada 30 min a extensão abre o Agênci@Net em segundo plano, baixa o que ficou pronto
+// e salva com as mesmas regras de pasta de Goiás (EMPRESA\NOTAS\MMAAAA).
+const DF_BASE = 'https://www2.agencianet.fazenda.df.gov.br';
+const DF_DEC = DF_BASE + '/DEC/#/';
+const soDig = t => String(t || '').replace(/\D/g, '');
+const brData = d => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+const PEND_DF = ['a_solicitar', 'solicitado'];
+
+let filaDf = Promise.resolve();
+function mudarDf(fn) {
+  const p = filaDf.then(async () => { const { df } = await get('df'); const d = df?.itens ? df : { itens: [] }; try { return await fn(d); } finally { await set({ df: d }); } });
+  filaDf = p.catch(e => console.warn('df:', e.message));
+  return p;
+}
+async function dfPendente(chave) {
+  if (!String(chave).includes(':')) return false;
+  const dl = String(chave).split(':')[0];
+  const { df } = await get('df');
+  return !!df?.itens?.some(i => i.dl === dl && PEND_DF.includes(i.estado));
+}
+
+async function separarUf(m) {
+  const emps = await api({ caminho: `empresas?select=id,razao_social,codigo,cnpj,ie,uf,pasta,baixar_entrada,baixar_saida,modelo&escritorio_id=eq.${m.escritorio_id}&ativa=eq.true` }) || [];
+  const ids = String(m.ie || '').split(/[,;\s]+/).map(soDig).filter(Boolean);
+  const esc = emps.filter(e => !ids.length || ids.includes(soDig(e.ie)) || ids.includes(soDig(e.cnpj)));
+  const ehDf = e => String(e.uf || '').toUpperCase() === 'DF';
+  return { go: esc.filter(e => !ehDf(e) && soDig(e.ie)).length, df: esc.filter(e => ehDf(e) && soDig(e.cnpj).length >= 11) };
+}
+
+async function solicitarDf(m, emps, soDf) {
+  const rot = (await api({ caminho: `rotinas?select=periodo,pasta_destino&escritorio_id=eq.${m.escritorio_id}` }).catch(() => []))?.[0];
+  const h = new Date(), atual = rot?.periodo === 'mes_atual';
+  let ini = new Date(h.getFullYear(), h.getMonth() - (atual ? 0 : 1), 1);
+  let fim = atual ? h : new Date(h.getFullYear(), h.getMonth(), 0);
+  const mc = String(m.comp || '').match(/^(\d{4})-(\d{2})/);
+  if (mc) { ini = new Date(+mc[1], +mc[2] - 1, 1); const u = new Date(+mc[1], +mc[2], 0); fim = u > h ? h : u; }
+  const comp = `${ini.getFullYear()}-${String(ini.getMonth() + 1).padStart(2, '0')}-01`;
+  const novos = [];
+  const { df } = await get('df');
+  const ja = df?.itens || [];
+  for (const e of emps) for (const tipo of ['entrada', 'saida']) {
+    if (!e[`baixar_${tipo}`]) continue;
+    const mods = { 55: ['NFE'], 65: ['NFCE'] }[e.modelo] || ['NFE', 'NFCE'];
+    const faltam = mods.filter(mod => !ja.some(i => i.empresa_id === e.id && i.tipo === tipo && i.mod === mod && i.comp === comp && !['erro'].includes(i.estado)));
+    if (!faltam.length) continue;
+    let dl = null;
+    try {
+      const r = await api({ metodo: 'POST', caminho: 'downloads', prefer: 'return=representation',
+        corpo: { empresa_id: e.id, escritorio_id: m.escritorio_id, execucao_id: m.execucao_id || null, competencia: comp, tipo, status: 'fila', mensagem: 'DF: solicitando os XMLs no Agênci@Net' } });
+      dl = r[0].id;
+    } catch (er) { console.warn('df downloads:', er.message); dl = 'x' + Date.now() + Math.random().toString(36).slice(2, 6); }
+    for (const mod of faltam) novos.push({ id: `${dl}:${mod}`, dl, empresa_id: e.id, nome: e.razao_social, codigo: e.codigo || '',
+      mae: (e.pasta || rot?.pasta_destino || 'C:\\Notas').replace(/[\\/]+$/, ''), cnpj: soDig(e.cnpj), tipo,
+      origem: tipo === 'entrada' ? 'D' : 'E', mod, ini: brData(ini), fim: brData(fim), comp, estado: 'a_solicitar', em: Date.now() });
+  }
+  await mudarDf(d => { d.itens = d.itens.filter(i => Date.now() - (i.em || 0) < 45 * 24 * 3600e3 || PEND_DF.includes(i.estado)); d.itens.push(...novos); });
+  if (soDf && m.execucao_id) api({ metodo: 'PATCH', caminho: `execucoes?id=eq.${m.execucao_id}`, corpo: { status: 'concluida', iniciada_em: new Date().toISOString(), finalizada_em: new Date().toISOString() } }).catch(() => {});
+  await abrirDf(true);
+}
+
+async function abrirDf(forcar) {
+  // 3.13.1: abrir aba nova perde o login do certificado; reaproveita a aba do Agênci@Net que já está logada.
+  const logada = (await chrome.tabs.query({ url: DF_BASE + '/*' })).find(t => !/CertificadoDigital/i.test(t.url || ''));
+  if (logada) { await set({ dfAba: logada.id }); await chrome.tabs.update(logada.id, { url: DF_DEC }); return; }
+  const { dfAba } = await get('dfAba');
+  if (dfAba) {
+    const t = await chrome.tabs.get(dfAba).catch(() => null);
+    if (t && /agencianet\.fazenda\.df\.gov\.br/.test(t.url || t.pendingUrl || '')) {
+      if (forcar) await chrome.tabs.update(dfAba, { url: DF_DEC });
+      return;
+    }
+  }
+  let t;
+  try { t = await chrome.tabs.create({ url: DF_DEC, active: false }); }
+  catch (_) { const w = await chrome.windows.create({ url: DF_DEC, focused: false }); t = w.tabs[0]; }
+  await set({ dfAba: t.id });
+}
+
+async function linhaDf(dl) {
+  if (!dl || String(dl).startsWith('x')) return;
+  const { df } = await get('df');
+  const its = (df?.itens || []).filter(i => i.dl === dl);
+  if (!its.length) return;
+  const erro = its.find(i => i.estado === 'erro');
+  if (erro) return marcarDl(dl, { status: 'erro', mensagem: erro.msg?.slice(0, 400) || 'Erro no DF' }).catch(() => {});
+  const pend = its.filter(i => PEND_DF.includes(i.estado));
+  if (pend.length) {
+    const prontos = its.length - pend.length;
+    const aviso = pend.find(i => i.msg)?.msg;
+    return marcarDl(dl, { status: 'fila', mensagem: `DF: ${prontos} de ${its.length} prontos (${its.map(i => i.mod).join(' + ')}). ${aviso || 'Aguardando o DF liberar o arquivo.'}` }).catch(() => {});
+  }
+  if (its.every(i => i.estado === 'sem_notas')) return marcarDl(dl, { status: 'sem_notas', qtd_notas: 0, mensagem: null }).catch(() => {});
+  const { zips } = await get('zips');
+  if (!Object.keys(zips || {}).some(k => k.startsWith(dl + ':'))) marcarDl(dl, { status: 'concluido', mensagem: null }).catch(() => {});
+}
+
+async function baixarDf(id, hash) {
+  const it = await mudarDf(d => d.itens.find(i => i.id === id));
+  if (!it) return false;
+  const mmaaaa = it.comp.slice(5, 7) + it.comp.slice(0, 4);
+  const tipoNome = it.tipo === 'entrada' ? 'Entrada' : 'Saida';
+  const nomeArq = `NOTAS\\${mmaaaa}\\${tipoNome}_${it.mod}_${mmaaaa}.zip`;
+  const guia = JSON.stringify({ m: it.mae, c: it.codigo, n: it.nome, a: nomeArq });
+  const b64 = btoa(unescape(encodeURIComponent(guia))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const limpoN = t => String(t).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  await mudarZips(z => { z[id] = { em: Date.now() }; });
+  await marcarDl(id, { status: 'processando', arquivo: `${it.mae}\\${limpoN(it.codigo ? `${it.codigo} - ${it.nome}` : it.nome)}\\${nomeArq}`, mensagem: 'Baixando o ZIP do DF...' }).catch(() => {});
+  const dId = await chrome.downloads.download({ url: `${DF_BASE}/DEC/BaixaPacoteConcluidoDEC?HashId=${encodeURIComponent(hash)}`,
+    filename: `Notas Sefaz/_organizar/${it.cnpj}_${it.tipo}${it.mod}_${mmaaaa}__${b64}.zip`, conflictAction: 'uniquify', saveAs: false });
+  await mudarZips(z => { if (z[id]) z[id].id = dId; });
+  await mudarDf(d => { const i = d.itens.find(x => x.id === id); if (i) Object.assign(i, { estado: 'baixado', hash, baixadoEm: Date.now(), msg: null }); });
+  return true;
+}
+
+// Funções que rodam dentro da página do DEC (precisam do Angular da própria página).
+const DF_PAGINA = {
+  estado: () => ({ pronto: !!(window.angular && document.querySelector('[ng-model="ctrl.consulta.CpfCnpj"]')),
+    token: (document.getElementById('capAgnet') || {}).value || '' }),
+  resetCaptcha: () => {
+    try { const c = document.getElementById('capAgnet'); if (c) c.value = ''; window.turnstile?.reset('#capcthaAgnet'); } catch (_) {}
+    return true;
+  },
+  solicitar: async (it) => {
+    const el = document.querySelector('[ng-model="ctrl.consulta.CpfCnpj"]');
+    const sc = window.angular.element(el).scope(); const ctrl = sc.ctrl;
+    const d = s => { const [a, b, c] = s.split('/').map(Number); return new Date(c, b - 1, a); };
+    let res = null;
+    const n = ctrl.notificacao, os = n.sucesso, oe = n.erro;
+    n.sucesso = function (m) { res = { ok: true, msg: String(m) }; return os.apply(this, arguments); };
+    n.erro = function (m) { res = { ok: false, msg: String(m) }; return oe.apply(this, arguments); };
+    try {
+      sc.$apply(() => Object.assign(ctrl.consulta, { Origem: it.origem, Tipo: it.mod, Criterio: 'D', CpfCnpj: it.cnpj,
+        DataInicio: d(it.ini), DataFim: d(it.fim), NumeroInicio: null, NumeroFim: null }));
+      sc.$apply(() => ctrl.solicitar());
+      for (let i = 0; i < 120 && !res; i++) await new Promise(r => setTimeout(r, 500));
+    } finally { n.sucesso = os; n.erro = oe; }
+    return res || { ok: false, msg: 'O DF não respondeu em 60 s' };
+  },
+  pacotes: async () => {
+    const inj = window.angular.element(document.querySelector('[ng-app]') || document.body).injector();
+    const $r = inj.get('$rootScope'), srv = inj.get('PacotesAgendadosSrv');
+    let p; $r.$apply(() => { p = srv.consultarSolicitacoesPacotes(); });
+    const r = await p;
+    const so = t => String(t ?? '').replace(/\D/g, '');
+    const lista = (r.data || []).map(o => {
+      const vals = Object.values(o).filter(v => typeof v === 'string' || typeof v === 'number');
+      const crit = vals.find(v => typeof v === 'string' && /^\s*(NFC?E|CTE|MDFE)\s*-/i.test(v)) || '';
+      const cnpj = so(vals.find(v => /^\d{11,14}$/.test(so(v)) && String(v).replace(/[\d.\/-]/g, '') === ''));
+      const situacao = vals.find(v => typeof v === 'string' && /conclu|process|aguard|erro|cancel|solicit/i.test(v) && v !== crit) || '';
+      return { hash: o.HashId, concl: o.Condicao === 'C', crit, cnpj, situacao: String(situacao) };
+    });
+    return { ok: true, lista, bruto: (r.data || []).slice(0, 2) };
+  },
+  verificar: async (hash) => {
+    const inj = window.angular.element(document.querySelector('[ng-app]') || document.body).injector();
+    let p; inj.get('$rootScope').$apply(() => { p = inj.get('PacotesAgendadosSrv').verificarArquivoDownload({ HashId: hash }); });
+    const r = await p; return { ok: r.data == -1, status: r.data };
+  },
+  cancelar: async (hash) => {
+    const inj = window.angular.element(document.querySelector('[ng-app]') || document.body).injector();
+    let p; inj.get('$rootScope').$apply(() => { p = inj.get('PacotesAgendadosSrv').cancelarSolicitacaoPacote({ HashId: hash }); });
+    await p; return true;
+  },
+};
+
+async function mensagemDf(m, remetente) {
+  const tab = remetente.tab;
+  if (m.tipo === 'dfMinhaAba') { const { dfAba } = await get('dfAba'); return !!tab && tab.id === dfAba; }
+  if (m.tipo === 'dfItens') { const { df } = await get('df'); return df?.itens || []; }
+  if (m.tipo === 'dfMarcar') {
+    const dl = await mudarDf(d => { const i = d.itens.find(x => x.id === m.id); if (i) Object.assign(i, m.patch); return i?.dl; });
+    await linhaDf(dl); return true;
+  }
+  if (m.tipo === 'dfBaixar') return baixarDf(m.id, m.hash);
+  if (m.tipo === 'dfDiag') return set({ dfDiag: { em: Date.now(), amostra: m.amostra } });
+  if (m.tipo === 'dfPagina') {
+    const f = DF_PAGINA[m.acao]; if (!f) throw new Error('ação desconhecida');
+    const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, world: 'MAIN', func: f, args: m.arg !== undefined ? [m.arg] : [] });
+    return r?.result;
+  }
+  if (m.tipo === 'dfLogin') {
+    marcarVerificacao(true);
+    await alertar(tab, 'Sefaz DF: entre com o certificado', 'Na aba do Agênci@Net, entre com o certificado digital do escritório. Depois eu continuo sozinho.');
+    return true;
+  }
+  if (m.tipo === 'dfVerificacao') {
+    marcarVerificacao(true);
+    await alertar(tab, 'Sefaz DF: confirme que é humano', 'Marque a caixinha da Cloudflare na aba do Agênci@Net. Depois eu continuo sozinho.');
+    return true;
+  }
+  if (m.tipo === 'dfOk') { marcarVerificacao(false); await limparAlerta(); return true; }
+  if (m.tipo === 'dfFim') {
+    const { df } = await get('df');
+    for (const dl of new Set((df?.itens || []).map(i => i.dl))) await linhaDf(dl);
+    // Volta terminada: fecha a aba que a extensão abriu (na próxima volta abre de novo).
+    // 3.13.1: a aba fica aberta (logada) para a próxima volta.
+    return true;
+  }
+}
+
+// A cada 30 min: se há pedido no DF esperando, abre o Agênci@Net em segundo plano para baixar.
+chrome.alarms.create('df', { periodInMinutes: 30 });
+chrome.alarms.onAlarm.addListener(async a => {
+  if (a.name !== 'df') return;
+  const { df } = await get('df');
+  if ((df?.itens || []).some(i => PEND_DF.includes(i.estado) || (i.estado === 'baixado' && !i.limpo))) abrirDf(false).catch(() => {});
+});
+chrome.tabs.onRemoved.addListener(async id => { const { dfAba } = await get('dfAba'); if (dfAba === id) set({ dfAba: null }); });

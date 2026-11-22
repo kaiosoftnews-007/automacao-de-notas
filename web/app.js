@@ -878,12 +878,13 @@ async function telaEscritorio(id, aba = 'empresas') {
       cont[k]++; if (sm) cont.semmov++;
       const obs = OBRIG.filter(([o]) => statusEnt(b, e, o) !== 'na');
       const pend = obs.filter(([o]) => ['pendente', 'atrasado'].includes(statusEnt(b, e, o))).length;
+      const bx = e.ie || (String(e.uf || '').toUpperCase() === 'DF' ? String(e.cnpj || '').replace(/\D/g, '') : '');   // DF baixa pelo CNPJ
       return `<tr class="click ${c === 'er' ? 'lin-er' : ''}" title="Clique na linha para abrir e editar a empresa" data-href="#/empresa/${e.id}" data-k="${k}" data-sm="${sm ? 1 : 0}" data-c="${e.contador_id || '-'}" data-t="${h(semAcento([e.razao_social, e.codigo, e.ie, e.cnpj, REGIMES[e.regime], nomeCont[e.contador_id]].join(' ')))} ${String(e.cnpj || '').replace(/\D/g, '')} ${String(e.ie || '').replace(/\D/g, '')}">
-        <td class="chk-col">${e.ie ? `<input type="checkbox" class="selEmp" data-ie="${h(e.ie)}" aria-label="Selecionar ${h(e.razao_social)}" ${sel.has(e.ie) ? 'checked' : ''}>` : ''}</td><td>${h(e.codigo || '')}</td>
-        <td data-ord="${h(e.razao_social)}"><div style="font-weight:600">${h(e.razao_social)}</div>${infoDl(e, c, l)}</td><td title="CNPJ ${h(e.cnpj || '—')}">${h(e.ie || '—')}</td>${temCont ? `<td data-ord="${h(nomeCont[e.contador_id] || '')}">${e.contador_id ? `<span class="pill cont">${h(nomeCont[e.contador_id] || '?')}</span>` : '<span class="sub">Escritório</span>'}</td>` : ''}<td>${REGIMES[e.regime] || '—'}</td>
+        <td class="chk-col">${bx ? `<input type="checkbox" class="selEmp" data-ie="${h(bx)}" aria-label="Selecionar ${h(e.razao_social)}" ${sel.has(bx) ? 'checked' : ''}>` : ''}</td><td>${h(e.codigo || '')}</td>
+        <td data-ord="${h(e.razao_social)}"><div style="font-weight:600">${h(e.razao_social)}</div>${infoDl(e, c, l)}</td><td title="CNPJ ${h(e.cnpj || '—')}">${h(e.ie || '—')}${String(e.uf || '').toUpperCase() === 'DF' ? ' <span class="pill cont">DF</span>' : ''}</td>${temCont ? `<td data-ord="${h(nomeCont[e.contador_id] || '')}">${e.contador_id ? `<span class="pill cont">${h(nomeCont[e.contador_id] || '?')}</span>` : '<span class="sub">Escritório</span>'}</td>` : ''}<td>${REGIMES[e.regime] || '—'}</td>
         <td class="c">${qtd(b, e, 'entrada') ?? '—'}</td><td class="c">${qtd(b, e, 'saida') ?? '—'}</td><td data-ord="${ORD_DL[l] ?? 9}"><span class="pill ${sm ? 'sm' : c}">${sm ? 'Sem mov.' : l}</span></td>
         <td data-ord="${pend}">${obs.map(([o]) => { const s = statusEnt(b, e, o); return `<button type="button" class="s ${ST_ENT[s][0]}" data-emp="${e.id}" data-ob="${o}" data-st="${s}" data-curto="${CURTO[o]}" title="${CURTO[o]}: ${ST_ENT[s][1]} (clique para mudar)">${CURTO[o]}</button>`; }).join(' ') || '—'}</td>
-        <td><div class="acts">${e.ie ? `<button type="button" class="btn s ${c === 'er' ? 'p' : ''}" data-baixar-ie="${h(e.ie)}" title="Baixar só esta empresa">${c === 'er' ? 'Refazer' : 'Baixar'}</button>` : ''}</div></td></tr>`;
+        <td><div class="acts">${bx ? `<button type="button" class="btn s ${c === 'er' ? 'p' : ''}" data-baixar-ie="${h(bx)}" title="Baixar só esta empresa">${c === 'er' ? 'Refazer' : 'Baixar'}</button>` : ''}</div></td></tr>`;
     }).join('');
     const chip = (k, nome, qt) => qt || k === 'todas' ? `<button type="button" class="chip ${fe.chip === k ? 'on' : ''}" data-chip="${k}">${nome} <em>${qt}</em></button>` : '';
     corpo = `<div class="chips"><label class="busca" style="flex:0 1 300px;height:38px">${ic('M21 21l-4.3-4.3M11 18a7 7 0 100-14 7 7 0 000 14z')}<input id="fq" type="text" placeholder="Filtrar: nome, código, IE, CNPJ ou regime" value="${h(fe.q)}" autocomplete="off"></label>
@@ -1047,6 +1048,12 @@ async function telaEscritorio(id, aba = 'empresas') {
 }
 
 // ---------- empresa ----------
+const UFS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+// Planilha: se a coluna UF trouxer o nome da cidade, ele vai para Cidade e a UF fica GO.
+function ufCidade(uf, cidade) {
+  const u = String(uf ?? '').trim().toUpperCase(), c = String(cidade ?? '').trim();
+  return UFS.includes(u) ? { uf: u, cidade: c || null } : { uf: 'GO', cidade: c || String(uf ?? '').trim() || null };
+}
 async function telaEmpresa(id, params) {
   const vez = ++st.vez;
   const nova = id === 'novo';
@@ -1056,7 +1063,7 @@ async function telaEmpresa(id, params) {
     q(sb.from('rotinas').select('escritorio_id,pasta_destino')),
   ]);
   if (!nova && !empBanco) return naoEncontrado('Empresa não encontrada', 'Ela pode ter sido excluída, ou o link está desatualizado.');
-  const emp = empBanco || { escritorio_id: params.get('esc') || st.perfil.escritorio_id, uf: 'GO', baixar_entrada: true, baixar_saida: true, incluir_eventos: true, modelo: 'todos', exibir_canceladas: false, obrigacoes: ['impt_nfs', 'apuracao'] };
+  const emp = empBanco || { escritorio_id: params.get('esc') || st.perfil.escritorio_id, uf: 'GO', cidade: '', baixar_entrada: true, baixar_saida: true, incluir_eventos: true, modelo: 'todos', exibir_canceladas: false, obrigacoes: ['impt_nfs', 'apuracao'] };
   const es = escs.find(e => e.id === emp.escritorio_id);
   const rot = rotinas.find(r => r.escritorio_id === emp.escritorio_id);
   const sel = (v, a) => v === a ? 'selected' : '';
@@ -1072,22 +1079,24 @@ async function telaEmpresa(id, params) {
             <label class="f" style="grid-column:span 2">Razão social<input name="razao_social" required value="${h(emp.razao_social)}"></label></div>
           <div class="g3"><label class="f">CNPJ<input name="cnpj" value="${h(emp.cnpj)}"></label>
             <label class="f">Inscrição estadual<input name="ie" value="${h(emp.ie)}" inputmode="numeric"></label>
-            <label class="f">UF<input name="uf" value="${h(emp.uf)}" maxlength="2"></label></div>
+            <label class="f">UF<select name="uf" id="ufEmp">${UFS.map(u => `<option value="${u}" ${sel(u, UFS.includes(emp.uf) ? emp.uf : 'GO')}>${u}${u === 'GO' ? ' — Sefaz Goiás (pela IE)' : u === 'DF' ? ' — Agênci@Net (pelo CNPJ)' : ''}</option>`).join('')}</select></label></div>
+          <label class="f">Cidade<input name="cidade" value="${h(emp.cidade || (UFS.includes(emp.uf) ? '' : emp.uf || ''))}" placeholder="opcional"></label>
           <div class="g2"><label class="f">Regime<select name="regime"><option value="">—</option>${Object.entries(REGIMES).map(([k, l]) => `<option value="${k}" ${sel(k, emp.regime)}>${l}</option>`).join('')}</select></label>
             <label class="f">Atividade<input name="atividade" value="${h(emp.atividade)}" placeholder="comércio, serviço, indústria"></label></div>
         </section>
         <section class="card pad" style="display:flex;flex-direction:column;gap:12px">
-          <h2>Download de notas na Sefaz-GO</h2>
-          <div class="sub">O robô usa o login do contador e a inscrição estadual acima. Sem IE, a empresa fica só no controle de entregas.</div>
-          ${conts ? `<label class="f">Contador (login usado na Sefaz)<select name="contador_id"><option value="">Login do escritório (padrão)</option>${conts.map(c => `<option value="${c.id}" ${sel(c.id, emp.contador_id)}>${h(c.nome)}${!c.cpf || !c.senha_secret_id ? ' — falta CPF e senha' : ''}</option>`).join('')}</select>
+          <h2 id="tDl">${emp.uf === 'DF' ? 'Download de notas no DF (Agênci@Net)' : 'Download de notas na Sefaz-GO'}</h2>
+          <div class="sub" id="sGo" ${emp.uf === 'DF' ? 'hidden' : ''}>O robô usa o login do contador e a inscrição estadual acima. Sem IE, a empresa fica só no controle de entregas.</div>
+          <div class="sub" id="sDf" ${emp.uf === 'DF' ? '' : 'hidden'}>No DF a extensão solicita os XMLs pelo <b>CNPJ</b> (a IE não é usada), com o certificado digital do escritório (procuração) aberto no Chrome. Entrada = Destinatário, Saída = Emitente; o modelo abaixo decide NF-e, NFC-e ou as duas. O DF pode levar até 2 dias para liberar: a extensão confere a cada 30 min e baixa sozinha. Salva na mesma pasta (EMPRESA\NOTAS\MMAAAA).</div>
+          ${conts ? `<label class="f" id="contGo" ${emp.uf === 'DF' ? 'hidden' : ''}>Contador (login usado na Sefaz)<select name="contador_id"><option value="">Login do escritório (padrão)</option>${conts.map(c => `<option value="${c.id}" ${sel(c.id, emp.contador_id)}>${h(c.nome)}${!c.cpf || !c.senha_secret_id ? ' — falta CPF e senha' : ''}</option>`).join('')}</select>
             <span class="sub" style="font-weight:400">Em branco = usa o login do escritório. Os contadores ficam em <a href="#/acesso?esc=${emp.escritorio_id}">Acesso à Sefaz</a>.</span></label>` : ''}
           <div class="g2"><div>
             <label class="chk"><input type="checkbox" name="baixar_entrada" ${emp.baixar_entrada ? 'checked' : ''}>Baixar notas de entrada</label>
             <label class="chk"><input type="checkbox" name="baixar_saida" ${emp.baixar_saida ? 'checked' : ''}>Baixar notas de saída</label>
-            <label class="chk"><input type="checkbox" name="incluir_eventos" ${emp.incluir_eventos ? 'checked' : ''}>Incluir eventos (cancelamento, CC-e)</label></div>
+            <label class="chk" id="evGo" ${emp.uf === 'DF' ? 'hidden' : ''}><input type="checkbox" name="incluir_eventos" ${emp.incluir_eventos ? 'checked' : ''}>Incluir eventos (cancelamento, CC-e)</label></div>
             <div style="display:flex;flex-direction:column;gap:12px">
             <label class="f">Modelo da NF-e<select name="modelo"><option value="todos" ${sel('todos', emp.modelo)}>Todos</option><option value="55" ${sel('55', emp.modelo)}>55 (NF-e)</option><option value="65" ${sel('65', emp.modelo)}>65 (NFC-e)</option></select></label>
-            <label class="f">Notas canceladas<select name="exibir_canceladas"><option value="false">Não exibir</option><option value="true" ${emp.exibir_canceladas ? 'selected' : ''}>Exibir</option></select></label></div></div>
+            <label class="f" id="cancGo" ${emp.uf === 'DF' ? 'hidden' : ''}>Notas canceladas<select name="exibir_canceladas"><option value="false">Não exibir</option><option value="true" ${emp.exibir_canceladas ? 'selected' : ''}>Exibir</option></select></label></div></div>
           <label class="f">Pasta mãe desta empresa no computador
             <input name="pasta" value="${h(emp.pasta)}" placeholder="${h(rot?.pasta_destino || 'C:\\Notas')}">
             <span class="sub" style="font-weight:400">Ex.: C:\\Clientes. Dentro dela a automação procura a pasta da empresa (pelo código ou pelo nome) e, se não achar, cria "${h(emp.codigo ? emp.codigo + ' - ' : '')}${h(emp.razao_social || 'Empresa')}". Lá dentro cria a pasta do mês (ex.: 102026) com Entrada_102026.zip e Saida_102026.zip. Em branco, usa a pasta mãe da Rotina.</span>
@@ -1104,7 +1113,7 @@ async function telaEmpresa(id, params) {
       </form>
       <aside class="card pad" style="display:flex;flex-direction:column;gap:14px">
         <h2>Importar várias de uma vez</h2>
-        <div style="font-size:14px;color:var(--ink2)">Envie a planilha que você usa hoje. Colunas lidas: Código, IE, CNPJ, Clientes, Regime, Atividade, UF.</div>
+        <div style="font-size:14px;color:var(--ink2)">Envie a planilha que você usa hoje. Colunas lidas: Código, IE, CNPJ, Clientes, Regime, Atividade, UF, Cidade.</div>
         <label class="btn o" style="display:inline-flex;align-items:center;justify-content:center">Importar planilha Excel<input type="file" id="arq" accept=".xlsx,.xls,.csv" hidden></label>
         <div id="imp" class="sub"></div>
       </aside>
@@ -1112,10 +1121,11 @@ async function telaEmpresa(id, params) {
   $('#f').onsubmit = async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    if (fd.get('uf') === 'DF' && String(fd.get('cnpj') || '').replace(/\D/g, '').length < 11) { toast('Empresa do DF: preencha o CNPJ (o download no DF é feito pelo CNPJ).'); return; }
     const reg = {
       escritorio_id: fd.get('escritorio_id') || emp.escritorio_id,
       codigo: fd.get('codigo') || null, razao_social: fd.get('razao_social').trim(), cnpj: fd.get('cnpj') || null,
-      ie: (fd.get('ie') || '').replace(/\D/g, '') || null, uf: (fd.get('uf') || 'GO').toUpperCase(), regime: fd.get('regime') || null,
+      ie: (fd.get('ie') || '').replace(/\D/g, '') || null, uf: fd.get('uf') || 'GO', cidade: (fd.get('cidade') || '').trim() || null, regime: fd.get('regime') || null,
       atividade: fd.get('atividade') || null, baixar_entrada: fd.has('baixar_entrada'), baixar_saida: fd.has('baixar_saida'),
       incluir_eventos: fd.has('incluir_eventos'), modelo: fd.get('modelo'), exibir_canceladas: fd.get('exibir_canceladas') === 'true',
       obrigacoes: OBRIG.map(([k]) => k).filter(k => fd.has('ob_' + k)),
@@ -1125,6 +1135,11 @@ async function telaEmpresa(id, params) {
     if (conts) reg.contador_id = reg.escritorio_id === emp.escritorio_id ? fd.get('contador_id') || null : null;
     if (nova) await q(sb.from('empresas').insert(reg)); else await q(sb.from('empresas').update(reg).eq('id', id));
     limparCache(); toast('Empresa salva.'); go('#/escritorio/' + reg.escritorio_id);
+  };
+  $('#ufEmp').onchange = () => {
+    const df = $('#ufEmp').value === 'DF';
+    $('#tDl').textContent = df ? 'Download de notas no DF (Agênci@Net)' : 'Download de notas na Sefaz-GO';
+    ['#sGo', '#contGo', '#evGo', '#cancGo'].forEach(x => { if ($(x)) $(x).hidden = df; }); $('#sDf').hidden = !df;
   };
   if ($('#excluirEmp')) $('#excluirEmp').onclick = async () => {
     const ok = await confirmarComSenha(`Excluir ${emp.razao_social}?`, 'Apaga a empresa, o histórico de downloads e as entregas dela. Não tem como desfazer. Se for só parar de baixar, use Desativar.');
@@ -1149,13 +1164,13 @@ async function importarPlanilha(arq, escritorioId) {
   if (ih < 0) return $('#imp').textContent = 'Não achei a coluna CNPJ na planilha.';
   const cab = linhas[ih].map(norm);
   const col = (...nomes) => cab.findIndex(c => nomes.includes(c));
-  const c = { cod: col('CODIGO', 'COD'), ie: col('IE', 'INSCRICAO ESTADUAL'), cnpj: col('CNPJ'), nome: col('CLIENTES', 'CLIENTE', 'RAZAO SOCIAL', 'EMPRESA'), reg: col('REGIME'), atv: col('ATIVIDADE'), uf: col('UF') };
+  const c = { cod: col('CODIGO', 'COD'), ie: col('IE', 'INSCRICAO ESTADUAL'), cnpj: col('CNPJ'), nome: col('CLIENTES', 'CLIENTE', 'RAZAO SOCIAL', 'EMPRESA'), reg: col('REGIME'), atv: col('ATIVIDADE'), uf: col('UF'), cid: col('CIDADE', 'MUNICIPIO') };
   const regime = r => { const x = norm(r); return x.startsWith('SIMPLES') ? 'simples' : x.includes('PRESUMIDO') ? 'presumido' : x.includes('REAL') ? 'real' : x.includes('MEI') ? 'mei' : x ? 'outro' : null; };
   const regs = linhas.slice(ih + 1).filter(r => c.nome >= 0 && String(r[c.nome]).trim()).map(r => ({
     escritorio_id: escritorioId, codigo: c.cod >= 0 ? String(r[c.cod]).trim() || null : null,
     ie: c.ie >= 0 ? String(r[c.ie]).replace(/\D/g, '') || null : null, cnpj: c.cnpj >= 0 ? String(r[c.cnpj]).trim() || null : null,
     razao_social: String(r[c.nome]).trim(), regime: c.reg >= 0 ? regime(r[c.reg]) : null,
-    atividade: c.atv >= 0 ? String(r[c.atv]).trim() || null : null, uf: c.uf >= 0 ? String(r[c.uf]).trim().toUpperCase() || 'GO' : 'GO',
+    atividade: c.atv >= 0 ? String(r[c.atv]).trim() || null : null, ...ufCidade(c.uf >= 0 ? r[c.uf] : '', c.cid >= 0 ? r[c.cid] : ''),
     obrigacoes: ['impt_nfs', 'apuracao'].concat(c.reg >= 0 && regime(r[c.reg]) === 'simples' ? ['pgdas'] : []),
   }));
   if (!regs.length) return $('#imp').textContent = 'Nenhuma empresa encontrada na planilha.';

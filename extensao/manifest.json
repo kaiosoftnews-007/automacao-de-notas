@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Automação de Notas — Sefaz GO",
-  "version": "3.12.1",
+  "name": "Automação de Notas — Sefaz GO e DF",
+  "version": "3.13.1",
   "description": "Baixa os XMLs (entrada e saída) no portal da Sefaz GO, empresa por empresa, e registra no painel. A verificação 'Confirme que é humano' nunca é clicada pela extensão.",
   "permissions": [
     "storage",
@@ -15,7 +15,8 @@
   "host_permissions": [
     "https://ankmyrxwxaevxmorfedd.supabase.co/*",
     "https://*.sefaz.go.gov.br/*",
-    "https://automacao-de-notas.denise-vaz1541.workers.dev/*"
+    "https://automacao-de-notas.denise-vaz1541.workers.dev/*",
+    "https://www2.agencianet.fazenda.df.gov.br/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -25,6 +26,15 @@
     "default_title": "Automação de Notas"
   },
   "content_scripts": [
+    {
+      "matches": [
+        "https://www2.agencianet.fazenda.df.gov.br/*"
+      ],
+      "js": [
+        "df.js"
+      ],
+      "run_at": "document_idle"
+    },
     {
       "matches": [
         "https://nfeweb.sefaz.go.gov.br/*"
