@@ -1,0 +1,15 @@
+{
+  "name": "qualidade",
+  "private": true,
+  "type": "module",
+  "description": "Lint do padrão kaiosoftnews-007/padrao-qualidade. Isolado nesta pasta para não mexer no build/deploy do projeto.",
+  "scripts": {
+    "lint": "cd .. && eslint -c qualidade/eslint.config.mjs .",
+    "lint:fix": "cd .. && eslint -c qualidade/eslint.config.mjs . --fix"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.15.0",
+    "globals": "^17.0.0"
+  }
+}
