@@ -189,7 +189,10 @@ chrome.runtime.onMessage.addListener((m, remetente, responder) => {
 });
 
 // O ZIP do histórico da Sefaz vai para Downloads\Notas Sefaz\<empresa>\<mês>\<Entrada|Saida>\
+const nomesDf = new Map();   // 3.13.5: url do pacote do DF -> nome com a guia de pasta
 chrome.downloads.onDeterminingFilename.addListener((item, sugerir) => {
+  const nDf = nomesDf.get(item.url) || nomesDf.get(item.finalUrl);
+  if (nDf) { sugerir({ filename: nDf, conflictAction: 'uniquify' }); return; }   // sem isso o Chrome usa o nome do DF e salva solto em Downloads
   if (!/sefaz\.go\.gov\.br/.test(item.url + ' ' + (item.referrer || ''))) return;
   get('proximoNome').then(({ proximoNome: p }) => {
     if (p && Date.now() < p.ate) { set({ proximoNome: null }); if (p.dl) mudarZips(z => { if (z[p.dl]) z[p.dl].id = item.id; }); sugerir({ filename: p.nome, conflictAction: 'uniquify' }); }
@@ -530,8 +533,10 @@ async function baixarDf(id, hash) {
   const limpoN = t => String(t).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
   await mudarZips(z => { z[id] = { em: Date.now() }; });
   await marcarDl(id, { status: 'processando', arquivo: `${it.mae}\\${limpoN(it.codigo ? `${it.codigo} - ${it.nome}` : it.nome)}\\${nomeArq}`, mensagem: 'Baixando o ZIP do DF...' }).catch(() => {});
-  const dId = await chrome.downloads.download({ url: `${DF_BASE}/DEC/BaixaPacoteConcluidoDEC?HashId=${encodeURIComponent(hash)}`,
-    filename: `Notas Sefaz/_organizar/${it.cnpj}_${it.tipo}${it.mod}_${mmaaaa}__${b64}.zip`, conflictAction: 'uniquify', saveAs: false });
+  const url = `${DF_BASE}/DEC/BaixaPacoteConcluidoDEC?HashId=${encodeURIComponent(hash)}`;
+  const filename = `Notas Sefaz/_organizar/${it.cnpj}_${it.tipo}${it.mod}_${mmaaaa}__${b64}.zip`;
+  nomesDf.set(url, filename); setTimeout(() => nomesDf.delete(url), 10 * 60e3);
+  const dId = await chrome.downloads.download({ url, filename, conflictAction: 'uniquify', saveAs: false });
   await mudarZips(z => { if (z[id]) z[id].id = dId; });
   await mudarDf(d => { const i = d.itens.find(x => x.id === id); if (i) Object.assign(i, { estado: 'baixado', hash, baixadoEm: Date.now(), msg: null }); });
   return true;

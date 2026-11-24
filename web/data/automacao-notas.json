@@ -1,6 +1,6 @@
 {
-  "versao": "3.13.4",
+  "versao": "3.13.5",
   "mudancas": [
-    "DF: na hora de baixar, usa a pasta, o código e o nome que estão no cadastro da empresa naquele momento (antes valia o que estava no cadastro quando o pedido foi feito)"
+    "DF: o ZIP baixado vai para a pasta da empresa (EMPRESA > NOTAS > MMAAAA) em vez de ficar solto em Downloads com o nome XML_NFE_..."
   ]
 }
