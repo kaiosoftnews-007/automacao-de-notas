@@ -516,6 +516,12 @@ async function linhaDf(dl) {
 async function baixarDf(id, hash) {
   const it = await mudarDf(d => d.itens.find(i => i.id === id));
   if (!it) return false;
+  // 3.13.4: no DF o download sai horas depois do pedido; pega a pasta/código/nome atuais do cadastro.
+  try {
+    const [e] = await api({ caminho: `empresas?select=pasta,codigo,razao_social,escritorio_id&id=eq.${it.empresa_id}` });
+    const r = e && (await api({ caminho: `rotinas?select=pasta_destino&escritorio_id=eq.${e.escritorio_id}` }).catch(() => []))?.[0];
+    if (e) Object.assign(it, { mae: (e.pasta || r?.pasta_destino || it.mae).replace(/[\\/]+$/, ''), codigo: e.codigo || '', nome: e.razao_social || it.nome });
+  } catch (_) {}
   const mmaaaa = it.comp.slice(5, 7) + it.comp.slice(0, 4);
   const tipoNome = it.tipo === 'entrada' ? 'Entrada' : 'Saida';
   const nomeArq = `NOTAS\\${mmaaaa}\\${tipoNome}_${it.mod}_${mmaaaa}.zip`;
