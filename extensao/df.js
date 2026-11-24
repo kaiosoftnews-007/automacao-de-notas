@@ -54,7 +54,7 @@
       const tent = (it.tent || 0) + 1;
       let patch;
       if (r?.ok || /j[áa] existe pedido anterior/i.test(msg)) patch = { estado: 'solicitado', solicitadoEm: Date.now(), msg: null };
-      else if (/n[ãa]o foram encontrados documentos/i.test(msg)) patch = { estado: 'sem_notas', msg: null };
+      else if (/n[ãa]o foram encontrados documentos|n[ãa]o foi poss[íi]vel localizar arquivo/i.test(msg)) patch = { estado: 'sem_notas', msg: null };
       else if (/limite de solicita/i.test(msg)) {
         await bg({ tipo: 'dfMarcar', id: it.id, patch: { msg: 'Fila do DF cheia: peço de novo quando liberar espaço.' } });
         await pag('resetCaptcha'); return;
