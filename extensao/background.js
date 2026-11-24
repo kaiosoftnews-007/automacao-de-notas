@@ -457,7 +457,7 @@ async function solicitarDf(m, emps, soDf) {
   const novos = [];
   const { df } = await get('df');
   const ja = df?.itens || [];
-  for (const e of emps) for (const tipo of ['entrada', 'saida']) {
+  for (const e of emps) for (const tipo of ['saida', 'entrada']) {   // DF: Emitente primeiro, depois Destinatário
     if (!e[`baixar_${tipo}`]) continue;
     const mods = { 55: ['NFE'], 65: ['NFCE'] }[e.modelo] || ['NFE', 'NFCE'];
     const faltam = mods.filter(mod => !ja.some(i => i.empresa_id === e.id && i.tipo === tipo && i.mod === mod && i.comp === comp && !['erro'].includes(i.estado)));
