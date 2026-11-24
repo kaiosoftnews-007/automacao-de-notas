@@ -1,6 +1,8 @@
 {
-  "versao": "3.12.1",
+  "versao": "3.13.1",
   "mudancas": [
-    "As notas agora são salvas dentro da pasta NOTAS da empresa (ex.: EMPRESA\\NOTAS\\112026\\Entrada_112026.zip); se a pasta NOTAS não existir, ela é criada"
+    "Novo: empresas do DF (UF = DF) baixam pelo CNPJ no Agênci@Net (DEC), com o certificado do escritório: a extensão solicita NF-e e NFC-e (entrada = destinatário, saída = emitente) e baixa quando o DF libera, conferindo a cada 30 min",
+    "DF: usa a aba do Agênci@Net que já está logada (abrir aba nova perde o certificado); se o portal pedir login ou a Cloudflare pedir clique, aparece o aviso vermelho",
+    "Goiás continua igual"
   ]
 }
