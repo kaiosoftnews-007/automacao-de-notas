@@ -665,7 +665,8 @@ async function mensagemDf(m, remetente) {
 }
 
 // A cada 5 min (3.13.6; antes 30): se há pedido no DF esperando, abre o Agênci@Net em segundo plano para baixar.
-chrome.alarms.create('df', { periodInMinutes: 5 });
+// 3.13.9: só cria o alarme se ainda não existe. Recriar a cada vez que a extensão acorda zerava o relógio e ele nunca tocava.
+chrome.alarms.get('df', a => { if (!a || a.periodInMinutes !== 5) chrome.alarms.create('df', { periodInMinutes: 5 }); });
 chrome.alarms.onAlarm.addListener(async a => {
   if (a.name !== 'df') return;
   const { df } = await get('df');
