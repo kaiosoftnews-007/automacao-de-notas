@@ -139,7 +139,11 @@ function carregarMenu(forcar = false) {
     const [al, pcsR, princR, exeR] = await Promise.all([
       sb.from('alertas').select('id', { count: 'exact', head: true }).is('resolvido_em', null),
       sb.from('computadores').select('*').order('nome'),
-      sb.from('extensao_versoes').select('versao').eq('principal', true).maybeSingle(),
+      sb.from('extensao_versoes').select('versao').eq('principal', true).maybeSingle().then(async r => {
+        const pub = await versaoPublicada();
+        if (pub?.versao && (!r?.data?.versao || cmpVer(pub.versao, r.data.versao) > 0)) return { data: { versao: pub.versao } };
+        return r;
+      }),
       sb.from('execucoes').select('id,escritorio_id,status,pc_id,ie,competencia,solicitada_em,iniciada_em,escritorios(nome)')
         .in('status', ['rodando', 'aguardando_pc']).gte('solicitada_em', desde).order('solicitada_em', { ascending: false }).limit(6),
     ]);
@@ -1404,6 +1408,11 @@ function pedirLoginExtensao(atual) {
   });
 }
 const dataBr = d => new Date(d + 'T12:00').toLocaleDateString('pt-BR');
+// A versão que os computadores recebem ao clicar em Atualizar é a de /data (gerada a cada push), não a da tabela.
+// Se ela for mais nova que a "principal" do banco, é ela que vale como versão para instalar.
+async function versaoPublicada() {
+  try { const r = await fetch('data/automacao-notas.json?t=' + Date.now(), { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch (_) { return null; }
+}
 async function telaAtualizacoes() {
   const vez = ++st.vez;
   if (!eAdmin()) return go('#/');
@@ -1413,7 +1422,10 @@ async function telaAtualizacoes() {
     q(sb.from('extensao_login').select('email,alterado_em')),
   ]);
   vers.sort((a, b) => cmpVer(b.versao, a.versao));
-  const princ = vers.find(v => v.principal) || vers[0], login = logins[0];
+  let princ = vers.find(v => v.principal) || vers[0]; const login = logins[0];
+  const pub = await versaoPublicada();
+  if (pub?.versao && (!princ || cmpVer(pub.versao, princ.versao) > 0))
+    princ = { versao: pub.versao, descricao: (pub.mudancas || []).join(' '), publicada_em: null, ref: 'main', principal: true };
   const atras = pcs.filter(p => desatualizado(p, princ?.versao));
   const minhaExt = document.documentElement.dataset.automacaoNotas;   // versão da extensão neste Chrome (painel.js)
   const esteAtras = !!(princ && minhaExt && cmpVer(minhaExt, princ.versao) < 0);
@@ -1424,7 +1436,7 @@ async function telaAtualizacoes() {
       <div style="width:52px;height:52px;border-radius:10px;background:var(--navy);display:flex;align-items:center;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg></div>
       <div style="flex:1;min-width:260px"><div class="sub">Versão para instalar</div>
         <div style="font-size:28px;font-weight:700;margin-top:2px">${h(princ.versao)} <span class="pill ok" style="vertical-align:middle;margin-left:6px">Principal</span></div>
-        <div class="sub" style="margin-top:4px">Publicada em ${dataBr(princ.publicada_em)} · ${h(princ.descricao || '')}. Só os arquivos da extensão do Chrome, já com o login do painel.</div></div>
+        <div class="sub" style="margin-top:4px">${princ.publicada_em ? `Publicada em ${dataBr(princ.publicada_em)}` : 'Última publicada'} · ${h(princ.descricao || '')} Só os arquivos da extensão do Chrome, já com o login do painel.</div></div>
       <button type="button" class="btn p" style="padding:0 22px" data-baixar="${h(princ.versao)}">Baixar extensão (.zip)</button>
     </section>` : '<div class="card empty">Nenhuma versão cadastrada.</div>'}
     <div class="sub" style="margin-top:-8px">Login dentro da extensão: ${login ? `<b>${h(login.email)}</b>` : '<b style="color:var(--err)">não configurado</b>'} · <a href="#" id="trocar-login">${login ? 'Alterar' : 'Configurar'}</a></div>
@@ -1480,7 +1492,7 @@ async function telaAtualizacoes() {
     window.postMessage({ tipo: 'automacao-notas:atualizar' }, location.origin);
   };
   $$('[data-baixar]').forEach(bt => bt.onclick = async () => {
-    const v = vers.find(x => x.versao === bt.dataset.baixar);
+    const v = vers.find(x => x.versao === bt.dataset.baixar) || (princ.versao === bt.dataset.baixar ? princ : null);
     if (!login && !await pedirLoginExtensao()) return;
     const txt = bt.textContent; bt.disabled = true; bt.textContent = 'Montando…';
     try { await montarZip(v); toast(`Extensão ${v.versao} baixada.`); if (!login) telaAtualizacoes(); }
