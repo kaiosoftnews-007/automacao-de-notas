@@ -803,7 +803,7 @@ async function telaEscritorios() {
     <section class="cols">
       <div class="card tbl-wrap">${escs.length ? `<table class="tbl"><thead><tr><th>Escritório</th><th>CNPJ</th><th class="c">Empresas</th><th>Acesso Sefaz</th><th></th></tr></thead><tbody>
         ${escs.map(e => `<tr class="click" data-href="#/escritorio/${e.id}"><td><a href="#/escritorio/${e.id}" style="font-weight:600">${h(e.nome)}</a></td><td>${h(e.cnpj || '—')}</td>
-          <td class="c">${emps.filter(x => x.escritorio_id === e.id).length}</td><td>${pillSefaz(sit[e.id])}</td><td style="text-align:right"><button type="button" class="btn s" data-editar="${e.id}">Editar</button></td></tr>`).join('')}
+          <td class="c">${emps.filter(x => x.escritorio_id === e.id).length}</td><td>${pillSefaz(sit[e.id])}</td><td style="text-align:right;white-space:nowrap"><button type="button" class="btn s" data-editar="${e.id}">Editar</button> <button type="button" class="btn s perigo" data-excluir="${e.id}">Excluir</button></td></tr>`).join('')}
       </tbody></table>` : '<div class="empty">Nenhum escritório cadastrado ainda.</div>'}</div>
       <form class="card pad" id="novo" style="display:flex;flex-direction:column;gap:14px">
         <h2>Novo escritório</h2>
@@ -816,6 +816,14 @@ async function telaEscritorios() {
   $$('tr.click').forEach(tr => tr.onclick = ev => { if (!['A', 'BUTTON'].includes(ev.target.tagName)) go(tr.dataset.href); });
   $$('[data-editar]').forEach(bt => bt.onclick = async () => {
     if (await editarEscritorio(escs.find(e => e.id === bt.dataset.editar))) telaEscritorios();
+  });
+  $$('[data-excluir]').forEach(bt => bt.onclick = async () => {
+    const es = escs.find(e => e.id === bt.dataset.excluir);
+    const n = emps.filter(x => x.escritorio_id === es.id).length;
+    const ok = await confirmarComSenha(`Excluir ${es.nome}?`, `Apaga o escritório, as ${n} empresas dele, o histórico de downloads, as entregas, os alertas e a senha da Sefaz. Não tem como desfazer. Os XMLs já salvos no computador continuam lá.`);
+    if (!ok) return;
+    await q(sb.from('escritorios').delete().eq('id', es.id));
+    limparCache(); toast('Escritório excluído.'); telaEscritorios();
   });
   $('#novo').onsubmit = async e => {
     e.preventDefault();
