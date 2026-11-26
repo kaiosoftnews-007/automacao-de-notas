@@ -28,6 +28,7 @@
     for (let i = 0; i < 60; i++) { e = await pag('estado').catch(() => null); if (e?.pronto) break; await dorme(1000); }
     if (!e?.pronto) return bg({ tipo: 'dfLogin' }).catch(() => {});   // DEC não abriu: provavelmente pediu o login
     await bg({ tipo: 'dfOk' }).catch(() => {});
+    await bg({ tipo: 'dfRodando' }).catch(() => {});
     try {
       await solicitarTodos();
       await baixarProntos();
@@ -45,10 +46,19 @@
     return false;
   }
 
+  // 3.13.7: relê a fila depois de cada rodada, para pegar empresas escolhidas no painel enquanto a volta já rodava.
   async function solicitarTodos() {
-    const itens = (await bg({ tipo: 'dfItens' })) || [];
-    for (const it of itens.filter(i => i.estado === 'a_solicitar')) {
-      if (!(await esperarCaptcha())) return;
+    for (let rodada = 0; rodada < 4; rodada++) {
+      const pend = ((await bg({ tipo: 'dfItens' })) || []).filter(i => i.estado === 'a_solicitar');
+      if (!pend.length) return;
+      if (!(await solicitarLista(pend))) return;
+    }
+  }
+
+  async function solicitarLista(itens) {
+    for (const it of itens) {
+      await bg({ tipo: 'dfRodando' }).catch(() => {});
+      if (!(await esperarCaptcha())) return false;
       const r = await pag('solicitar', it).catch(er => ({ ok: false, msg: er.message }));
       const msg = r?.msg || 'sem resposta';
       const tent = (it.tent || 0) + 1;
@@ -57,7 +67,7 @@
       else if (/n[ãa]o foram encontrados documentos|n[ãa]o foi poss[íi]vel localizar arquivo/i.test(msg)) patch = { estado: 'sem_notas', msg: null };
       else if (/limite de solicita/i.test(msg)) {
         await bg({ tipo: 'dfMarcar', id: it.id, patch: { msg: 'Fila do DF cheia: peço de novo quando liberar espaço.' } });
-        await pag('resetCaptcha'); return;
+        await pag('resetCaptcha'); return false;
       }
       else if (/permiss/i.test(msg)) patch = { estado: 'erro', msg: 'O certificado do escritório não tem procuração para esta empresa no DF (precisa do certificado próprio).' };
       else if (/credenciais/i.test(msg)) patch = { estado: 'erro', msg: 'O DF recusou o certificado (credenciais inválidas).' };
@@ -67,6 +77,7 @@
       await pag('resetCaptcha');
       await dorme(2000);
     }
+    return true;
   }
 
   const casa = (p, it) => {

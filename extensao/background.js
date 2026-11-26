@@ -481,6 +481,9 @@ async function solicitarDf(m, emps, soDf) {
 }
 
 async function abrirDf(forcar) {
+  // 3.13.7: se a aba do DF está no meio de uma volta, não recarrega (ela mesma pega as empresas novas da fila).
+  const { dfRodando } = await get('dfRodando');
+  if (dfRodando && Date.now() - dfRodando < 12 * 60e3) return;
   // 3.13.1: abrir aba nova perde o login do certificado; reaproveita a aba do Agênci@Net que já está logada.
   const logada = (await chrome.tabs.query({ url: DF_BASE + '/*' })).find(t => !/CertificadoDigital/i.test(t.url || ''));
   // 3.13.6: se a aba já está no DEC, ir para o mesmo endereço não recarrega a página (só muda o #) e o robô não liga; recarrega.
@@ -624,8 +627,10 @@ async function mensagemDf(m, remetente) {
     await alertar(tab, 'Sefaz DF: confirme que é humano', 'Marque a caixinha da Cloudflare na aba do Agênci@Net. Depois eu continuo sozinho.');
     return true;
   }
+  if (m.tipo === 'dfRodando') { await set({ dfRodando: Date.now() }); return true; }
   if (m.tipo === 'dfOk') { marcarVerificacao(false); await limparAlerta(); return true; }
   if (m.tipo === 'dfFim') {
+    await set({ dfRodando: 0 });
     const { df } = await get('df');
     for (const dl of new Set((df?.itens || []).map(i => i.dl))) await linhaDf(dl);
     // Volta terminada: fecha a aba que a extensão abriu (na próxima volta abre de novo).
@@ -641,4 +646,4 @@ chrome.alarms.onAlarm.addListener(async a => {
   const { df } = await get('df');
   if ((df?.itens || []).some(i => PEND_DF.includes(i.estado) || (i.estado === 'baixado' && !i.limpo))) abrirDf(false).catch(() => {});
 });
-chrome.tabs.onRemoved.addListener(async id => { const { dfAba } = await get('dfAba'); if (dfAba === id) set({ dfAba: null }); });
+chrome.tabs.onRemoved.addListener(async id => { const { dfAba } = await get('dfAba'); if (dfAba === id) set({ dfAba: null, dfRodando: 0 }); });
