@@ -420,7 +420,7 @@ chrome.storage.local.remove('atu'); chrome.alarms.clear('atualizacao');
 // ================= 3.13.0: Sefaz DF (Agênci@Net / DEC, acesso por certificado) =================
 // O pedido do painel separa as empresas por UF. As do DF (pelo CNPJ) viram 4 pedidos cada
 // (NF-e/NFC-e × Emitente/Destinatário, conforme o cadastro) na fila do DEC. O DF demora (até 2 dias)
-// para liberar: a cada 30 min a extensão abre o Agênci@Net em segundo plano, baixa o que ficou pronto
+// para liberar: a cada 5 min a extensão abre o Agênci@Net em segundo plano, baixa o que ficou pronto
 // e salva com as mesmas regras de pasta de Goiás (EMPRESA\NOTAS\MMAAAA).
 const DF_BASE = 'https://www2.agencianet.fazenda.df.gov.br';
 const DF_DEC = DF_BASE + '/DEC/#/';
@@ -595,6 +595,21 @@ const DF_PAGINA = {
     let p; inj.get('$rootScope').$apply(() => { p = inj.get('PacotesAgendadosSrv').verificarArquivoDownload({ HashId: hash }); });
     const r = await p; return { ok: r.data == -1, status: r.data };
   },
+  contar: async (hash) => {
+    const r = await fetch('/DEC/BaixaPacoteConcluidoDEC?HashId=' + encodeURIComponent(hash), { credentials: 'include' });
+    if (!r.ok) return { ok: false };
+    const b = new Uint8Array(await r.arrayBuffer()), v = new DataView(b.buffer);
+    let i = b.length - 22; while (i >= 0 && v.getUint32(i, true) !== 0x06054b50) i--;
+    if (i < 0) return { ok: false };
+    let o = v.getUint32(i + 16, true), n = 0;
+    const tot = v.getUint16(i + 10, true);
+    for (let k = 0; k < tot && v.getUint32(o, true) === 0x02014b50; k++) {
+      const ln = v.getUint16(o + 28, true), le = v.getUint16(o + 30, true), lc = v.getUint16(o + 32, true);
+      if (/\.xml$/i.test(new TextDecoder().decode(b.subarray(o + 46, o + 46 + ln)))) n++;
+      o += 46 + ln + le + lc;
+    }
+    return { ok: true, n };
+  },
   cancelar: async (hash) => {
     const inj = window.angular.element(document.querySelector('[ng-app]') || document.body).injector();
     let p; inj.get('$rootScope').$apply(() => { p = inj.get('PacotesAgendadosSrv').cancelarSolicitacaoPacote({ HashId: hash }); });
@@ -611,6 +626,16 @@ async function mensagemDf(m, remetente) {
     await linhaDf(dl); return true;
   }
   if (m.tipo === 'dfBaixar') return baixarDf(m.id, m.hash);
+  if (m.tipo === 'dfQtd') {
+    // Soma NF-e + NFC-e da mesma empresa/tipo e grava no download do painel.
+    const soma = await mudarDf(d => {
+      const i = d.itens.find(x => x.id === m.id); if (!i) return null;
+      i.n = m.n;
+      return { dl: i.dl, n: d.itens.filter(x => x.dl === i.dl).reduce((t, x) => t + (x.n || 0), 0) };
+    });
+    if (soma && !String(soma.dl).startsWith('x')) await marcarDl(soma.dl, { qtd_notas: soma.n }).catch(() => {});
+    return true;
+  }
   if (m.tipo === 'dfDiag') return set({ dfDiag: { em: Date.now(), amostra: m.amostra } });
   if (m.tipo === 'dfPagina') {
     const f = DF_PAGINA[m.acao]; if (!f) throw new Error('ação desconhecida');

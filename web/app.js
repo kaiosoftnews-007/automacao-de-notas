@@ -497,7 +497,7 @@ function statusImpt(b, emp) {
 }
 const statusEnt = (b, emp, ob) => b.entMap[emp.id + ob] || (!emp.obrigacoes.includes(ob) ? 'na' : ob === 'impt_nfs' ? statusImpt(b, emp) : 'pendente');
 function statusDownload(b, emp) {
-  if (!emp.ie) return ['na', 'Sem IE'];
+  if (!emp.ie && String(emp.uf || '').toUpperCase() !== 'DF') return ['na', 'Sem IE'];   // DF baixa pelo CNPJ, não tem IE
   const e = b.dlMap[emp.id + 'entrada'], s = b.dlMap[emp.id + 'saida'];
   const lista = [emp.baixar_entrada && e, emp.baixar_saida && s].filter(x => x !== false);
   if (!lista.length) return ['na', 'Desligado'];

@@ -110,6 +110,9 @@
       if (!(await pag('verificar', p.hash).catch(() => null))?.ok) continue;
       await bg({ tipo: 'dfBaixar', id: it.id, hash: p.hash });
       await dorme(4000);
+      // 3.13.8: conta os XMLs do pacote (o DF não informa a quantidade) para o painel mostrar entrada/saída.
+      const c = await pag('contar', p.hash).catch(() => null);
+      if (c?.ok) await bg({ tipo: 'dfQtd', id: it.id, n: c.n }).catch(() => {});
     }
     // Tira da lista do DF o que já foi baixado há mais de 15 min (libera espaço na fila de pedidos).
     itens = (await bg({ tipo: 'dfItens' })) || [];

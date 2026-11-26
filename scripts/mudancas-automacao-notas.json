@@ -1,5 +1,3 @@
 [
-  "DF: com a aba já aberta, escolher outra empresa no painel faz os pedidos dela (sem precisar de F5).",
-  "DF: confere a cada 5 minutos (antes 30) se os arquivos pedidos já estão prontos e baixa sozinha.",
-  "DF: se a aba estiver no meio dos pedidos, não recarrega; as empresas novas entram no fim da mesma volta."
+  "DF: conta os XMLs de cada pacote baixado e mostra a quantidade de notas de entrada e saída no painel."
 ]
