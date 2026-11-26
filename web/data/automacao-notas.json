@@ -1,6 +1,7 @@
 {
-  "versao": "3.13.5",
+  "versao": "3.13.6",
   "mudancas": [
-    "DF: o ZIP baixado vai para a pasta da empresa (EMPRESA > NOTAS > MMAAAA) em vez de ficar solto em Downloads com o nome XML_NFE_..."
+    "DF: ao escolher outra empresa com a aba do Agênci@Net já aberta, a extensão recarrega a aba e faz os pedidos (antes ficava parada).",
+    "DF: confere a cada 5 minutos (antes 30) se os arquivos pedidos já estão prontos e baixa sozinha."
   ]
 }

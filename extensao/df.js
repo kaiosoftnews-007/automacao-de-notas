@@ -1,6 +1,6 @@
 // 3.13.0 — Sefaz DF (Agênci@Net / DEC). Roda só na aba do Agênci@Net que a extensão abriu.
 // 1) Solicita os XMLs (NF-e e NFC-e, Emitente e Destinatário) pelo CNPJ de cada empresa DF do painel.
-// 2) Nas voltas seguintes (a cada 30 min), baixa os pacotes que o DF já deixou "Concluído".
+// 2) Nas voltas seguintes (a cada 5 min), baixa os pacotes que o DF já deixou "Concluído".
 // A verificação da Cloudflare NUNCA é clicada pela extensão: se ela pedir clique, a extensão avisa e espera.
 (() => {
   if (window.__anDf) return;

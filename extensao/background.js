@@ -483,12 +483,18 @@ async function solicitarDf(m, emps, soDf) {
 async function abrirDf(forcar) {
   // 3.13.1: abrir aba nova perde o login do certificado; reaproveita a aba do Agênci@Net que já está logada.
   const logada = (await chrome.tabs.query({ url: DF_BASE + '/*' })).find(t => !/CertificadoDigital/i.test(t.url || ''));
-  if (logada) { await set({ dfAba: logada.id }); await chrome.tabs.update(logada.id, { url: DF_DEC }); return; }
+  // 3.13.6: se a aba já está no DEC, ir para o mesmo endereço não recarrega a página (só muda o #) e o robô não liga; recarrega.
+  if (logada) {
+    await set({ dfAba: logada.id });
+    if (/\/DEC\//i.test(logada.url || '')) await chrome.tabs.reload(logada.id);
+    else await chrome.tabs.update(logada.id, { url: DF_DEC });
+    return;
+  }
   const { dfAba } = await get('dfAba');
   if (dfAba) {
     const t = await chrome.tabs.get(dfAba).catch(() => null);
     if (t && /agencianet\.fazenda\.df\.gov\.br/.test(t.url || t.pendingUrl || '')) {
-      if (forcar) await chrome.tabs.update(dfAba, { url: DF_DEC });
+      if (forcar) { if (/\/DEC\//i.test(t.url || '')) await chrome.tabs.reload(dfAba); else await chrome.tabs.update(dfAba, { url: DF_DEC }); }
       return;
     }
   }
@@ -628,8 +634,8 @@ async function mensagemDf(m, remetente) {
   }
 }
 
-// A cada 30 min: se há pedido no DF esperando, abre o Agênci@Net em segundo plano para baixar.
-chrome.alarms.create('df', { periodInMinutes: 30 });
+// A cada 5 min (3.13.6; antes 30): se há pedido no DF esperando, abre o Agênci@Net em segundo plano para baixar.
+chrome.alarms.create('df', { periodInMinutes: 5 });
 chrome.alarms.onAlarm.addListener(async a => {
   if (a.name !== 'df') return;
   const { df } = await get('df');
