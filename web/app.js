@@ -247,15 +247,22 @@ async function layout(vez, ativo, conteudo) {
 // ---------- atualização automática (sem F5) ----------
 // Só nas telas de acompanhamento (painel, escritório, entregas, alertas). Não mexe na tela enquanto
 // a pessoa digita, escolhe numa lista ou está com uma janela aberta.
+// 3.13.12: antes pulava sempre que uma lista (ex.: competência) continuava com o foco, e só o F5 resolvia.
+// Agora só espera se a pessoa mexeu na tela há menos de 10 s. Com download em andamento, atualiza a cada 10 s.
+let mexeuEm = 0, atualizouEm = Date.now();
+['keydown', 'input', 'pointerdown', 'wheel'].forEach(ev => document.addEventListener(ev, () => { mexeuEm = Date.now(); }, { passive: true, capture: true }));
 async function atualizarSozinho(forcar = false) {
   if (!st.reexibir || !st.session) return;
-  const foco = document.activeElement?.tagName;
-  if (!forcar && (document.hidden || document.querySelector('.modal-fundo') || ['INPUT', 'SELECT', 'TEXTAREA'].includes(foco) || root.querySelector('details[open]'))) return;
+  if (!forcar && (document.hidden || document.querySelector('.modal-fundo') || Date.now() - mexeuEm < 10000 || root.querySelector('details[open]'))) return;
+  atualizouEm = Date.now();
   limparCache(); carregarMenu(true);
   st.quieto = !forcar;
   try { await st.reexibir(); } catch (e) { if (e !== CANCELADA) console.error(e); } finally { st.quieto = false; }
 }
-setInterval(atualizarSozinho, 30000);
+setInterval(() => {
+  const andando = /Baixando|Na fila/.test(root.textContent || '');
+  if (Date.now() - atualizouEm >= (andando ? 10000 : 30000)) atualizarSozinho();
+}, 10000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - (st.menuEm || 0) > 30000) atualizarSozinho(); });
 
 // ---------- busca rápida (Ctrl K) ----------

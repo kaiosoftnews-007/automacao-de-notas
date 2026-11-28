@@ -1,4 +1,5 @@
 [
-  "DF: depois de marcar a caixinha da Cloudflare, o robô continua a consulta sozinho (antes desistia se passasse de 10 minutos).",
-  "DF: enquanto espera a caixinha, a aba não é mais recarregada a cada 5 minutos (não perde a verificação já feita)."
+  "DF: depois do primeiro pedido, o robô parava com a caixinha da Cloudflare verde; agora pede um código novo sozinho e continua.",
+  "DF: se mesmo assim travar por 2 minutos, aparece o aviso vermelho no painel dizendo o que fazer.",
+  "Painel: a tela se atualiza sozinha (a cada 10 s durante downloads), sem precisar de F5."
 ]

@@ -554,7 +554,15 @@ async function baixarDf(id, hash) {
 // Funções que rodam dentro da página do DEC (precisam do Angular da própria página).
 const DF_PAGINA = {
   estado: () => ({ pronto: !!(window.angular && document.querySelector('[ng-model="ctrl.consulta.CpfCnpj"]')),
-    token: (document.getElementById('capAgnet') || {}).value || '' }),
+    // 3.13.12: lê também direto da Cloudflare (o campo escondido às vezes fica vazio com a caixinha verde).
+    token: (() => { let t = (document.getElementById('capAgnet') || {}).value || ''; if (!t) try { t = window.turnstile?.getResponse() || ''; } catch (_) {} return t; })() }),
+  renovar: () => {
+    // Caixinha verde mas sem código novo: manda a Cloudflare gerar outro.
+    try { const c = document.getElementById('capAgnet'); if (c) c.value = ''; } catch (_) {}
+    try { window.turnstile?.reset('#capcthaAgnet'); } catch (_) {}
+    try { window.turnstile?.reset(); } catch (_) {}
+    return true;
+  },
   resetCaptcha: () => {
     try { const c = document.getElementById('capAgnet'); if (c) c.value = ''; window.turnstile?.reset('#capcthaAgnet'); } catch (_) {}
     return true;
@@ -650,6 +658,11 @@ async function mensagemDf(m, remetente) {
   if (m.tipo === 'dfVerificacao') {
     marcarVerificacao(true);
     await alertar(tab, 'Sefaz DF: confirme que é humano', 'Marque a caixinha da Cloudflare na aba do Agênci@Net. Depois eu continuo sozinho.');
+    return true;
+  }
+  if (m.tipo === 'dfTravou') {
+    marcarVerificacao(true);
+    await alertar(tab, 'Sefaz DF: a consulta parou', 'Na aba do Agênci@Net, aperte F5 (ou clique em Limpar e marque a caixinha). Depois eu continuo sozinho.');
     return true;
   }
   if (m.tipo === 'dfRodando') { await set({ dfRodando: Date.now() }); return true; }

@@ -46,13 +46,18 @@
   // 3.13.11: espera a caixinha da Cloudflare sem prazo curto (antes desistia em 10 min e a volta
   // terminava sem pedir nada). A cada minuto avisa que a aba está ocupada, para a volta de 5 em 5 min
   // não recarregar a página e perder a verificação já feita.
+  // 3.13.12: o código da Cloudflare só vale uma vez. Se a caixinha continua verde sem código novo,
+  // pede outro (a cada 20 s) e, depois de 2 min, avisa no painel em vez de ficar parado em silêncio.
+  let usado = '';
   async function esperarCaptcha() {
-    const t0 = Date.now(); let avisou = false, ultimo = t0, falhas = 0;
+    const t0 = Date.now(); let avisou = false, travou = false, ultimo = t0, renovou = t0, falhas = 0;
     while (Date.now() - t0 < 8 * 3600e3 && falhas < 30) {
       const e = await pag('estado').catch(() => null);
       if (!e) falhas++; else falhas = 0;   // extensão recarregada/aba fechada: para
-      if (e?.token) { if (avisou) bg({ tipo: 'dfOk' }).catch(() => {}); return true; }
-      if (!avisou && Date.now() - t0 > 15e3) { avisou = true; bg({ tipo: 'dfVerificacao' }).catch(() => {}); }
+      if (e?.token && e.token !== usado) { usado = e.token; if (avisou || travou) bg({ tipo: 'dfOk' }).catch(() => {}); return true; }
+      if (e?.token && e.token === usado && Date.now() - renovou > (renovou === t0 ? 10e3 : 20e3)) { renovou = Date.now(); await pag('renovar').catch(() => {}); }
+      if (!travou && Date.now() - t0 > 120e3) { travou = true; bg({ tipo: 'dfTravou' }).catch(() => {}); }
+      else if (!avisou && Date.now() - t0 > 15e3) { avisou = true; bg({ tipo: 'dfVerificacao' }).catch(() => {}); }
       if (Date.now() - ultimo > 60e3) { ultimo = Date.now(); bg({ tipo: 'dfRodando' }).catch(() => {}); }
       await dorme(1000);
     }
