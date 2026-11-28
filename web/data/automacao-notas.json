@@ -1,7 +1,8 @@
 {
-  "versao": "3.13.13",
+  "versao": "3.13.14",
   "mudancas": [
-    "DF: se a caixinha da Cloudflare não gerar código novo em 30 s, o robô dá F5 sozinho na aba do Agênci@Net e continua (até 3 vezes seguidas).",
-    "DF: só se os 3 F5 não resolverem aparece o aviso vermelho no painel."
+    "DF: pede tudo primeiro (todas as empresas, NF-e e NFC-e, Emitente e Destinatário) e não fica esperando o DF liberar.",
+    "DF: confere e baixa o que ficou pronto a cada 10 minutos (dá F5 sozinho na aba).",
+    "Painel: a linha do DF mostra o que aconteceu com cada modelo (ex.: \"NFC-e: DF sem notas no período\")."
   ]
 }

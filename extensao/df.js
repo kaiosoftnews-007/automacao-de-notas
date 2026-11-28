@@ -31,14 +31,9 @@
     await bg({ tipo: 'dfRodando' }).catch(() => {});
     try {
       await solicitarTodos();
-      // 3.13.9: o DF costuma liberar em 1–2 min; confere mais 3 vezes, de minuto em minuto, antes de esperar a próxima volta.
-      for (let k = 0; k < 4; k++) {
-        await baixarProntos();
-        const its = (await bg({ tipo: 'dfItens' })) || [];
-        if (!its.some(i => i.estado === 'solicitado') || k === 3) break;
-        await bg({ tipo: 'dfRodando' }).catch(() => {});
-        await dorme(60e3);
-      }
+      // 3.13.14: pede tudo primeiro; depois confere uma vez e encerra. O resto fica para a volta de 10 em 10 min
+      // (o DF às vezes leva dias para liberar).
+      await baixarProntos();
     } catch (er) { console.warn('DF:', er.message); }
     bg({ tipo: 'dfFim' }).catch(() => {});
   }

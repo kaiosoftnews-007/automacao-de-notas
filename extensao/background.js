@@ -514,15 +514,17 @@ async function linhaDf(dl) {
   if (!its.length) return;
   const erro = its.find(i => i.estado === 'erro');
   if (erro) return marcarDl(dl, { status: 'erro', mensagem: erro.msg?.slice(0, 400) || 'Erro no DF' }).catch(() => {});
+  // 3.13.14: mostra o que aconteceu com cada modelo (ex.: "NF-e: pedido, aguardando o DF · NFC-e: DF sem notas no período").
+  const desc = i => `${i.mod === 'NFCE' ? 'NFC-e' : 'NF-e'}: ${({ a_solicitar: 'a pedir', solicitado: 'pedido, aguardando o DF', sem_notas: 'DF sem notas no período', baixado: 'baixado' })[i.estado] || i.estado}`;
+  const resumo = `DF ${its.map(desc).join(' · ')}`;
   const pend = its.filter(i => PEND_DF.includes(i.estado));
   if (pend.length) {
-    const prontos = its.length - pend.length;
     const aviso = pend.find(i => i.msg)?.msg;
-    return marcarDl(dl, { status: 'fila', mensagem: `DF: ${prontos} de ${its.length} prontos (${its.map(i => i.mod).join(' + ')}). ${aviso || 'Aguardando o DF liberar o arquivo.'}` }).catch(() => {});
+    return marcarDl(dl, { status: 'fila', mensagem: `${resumo}.${aviso ? ' ' + aviso : ''}` }).catch(() => {});
   }
-  if (its.every(i => i.estado === 'sem_notas')) return marcarDl(dl, { status: 'sem_notas', qtd_notas: 0, mensagem: null }).catch(() => {});
+  if (its.every(i => i.estado === 'sem_notas')) return marcarDl(dl, { status: 'sem_notas', qtd_notas: 0, mensagem: resumo }).catch(() => {});
   const { zips } = await get('zips');
-  if (!Object.keys(zips || {}).some(k => k.startsWith(dl + ':'))) marcarDl(dl, { status: 'concluido', mensagem: null }).catch(() => {});
+  if (!Object.keys(zips || {}).some(k => k.startsWith(dl + ':'))) marcarDl(dl, { status: 'concluido', mensagem: its.some(i => i.estado === 'sem_notas') ? resumo : null }).catch(() => {});
 }
 
 async function baixarDf(id, hash) {
@@ -679,7 +681,8 @@ async function mensagemDf(m, remetente) {
 
 // A cada 5 min (3.13.6; antes 30): se há pedido no DF esperando, abre o Agênci@Net em segundo plano para baixar.
 // 3.13.9: só cria o alarme se ainda não existe. Recriar a cada vez que a extensão acorda zerava o relógio e ele nunca tocava.
-chrome.alarms.get('df', a => { if (!a || a.periodInMinutes !== 5) chrome.alarms.create('df', { periodInMinutes: 5 }); });
+// 3.13.14: conferência a cada 10 min (pedido novo pelo painel continua começando na hora).
+chrome.alarms.get('df', a => { if (!a || a.periodInMinutes !== 10) chrome.alarms.create('df', { periodInMinutes: 10 }); });
 chrome.alarms.onAlarm.addListener(async a => {
   if (a.name !== 'df') return;
   const { df } = await get('df');
