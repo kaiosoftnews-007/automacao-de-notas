@@ -1,7 +1,7 @@
 {
-  "versao": "3.13.10",
+  "versao": "3.13.11",
   "mudancas": [
-    "Atualizar: a página não fica mais parada em \"Conferindo a pasta da extensão…\"; se o Chrome não responder em 15 s, avisa o que fazer.",
-    "Atualizar: mostra em qual pasta está procurando e para se a pasta escolhida for grande demais."
+    "DF: depois de marcar a caixinha da Cloudflare, o robô continua a consulta sozinho (antes desistia se passasse de 10 minutos).",
+    "DF: enquanto espera a caixinha, a aba não é mais recarregada a cada 5 minutos (não perde a verificação já feita)."
   ]
 }

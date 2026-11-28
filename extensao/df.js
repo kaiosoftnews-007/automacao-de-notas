@@ -43,11 +43,17 @@
     bg({ tipo: 'dfFim' }).catch(() => {});
   }
 
+  // 3.13.11: espera a caixinha da Cloudflare sem prazo curto (antes desistia em 10 min e a volta
+  // terminava sem pedir nada). A cada minuto avisa que a aba está ocupada, para a volta de 5 em 5 min
+  // não recarregar a página e perder a verificação já feita.
   async function esperarCaptcha() {
-    const t0 = Date.now(); let avisou = false;
-    while (Date.now() - t0 < 10 * 60e3) {
-      if ((await pag('estado').catch(() => null))?.token) { if (avisou) bg({ tipo: 'dfOk' }).catch(() => {}); return true; }
+    const t0 = Date.now(); let avisou = false, ultimo = t0, falhas = 0;
+    while (Date.now() - t0 < 8 * 3600e3 && falhas < 30) {
+      const e = await pag('estado').catch(() => null);
+      if (!e) falhas++; else falhas = 0;   // extensão recarregada/aba fechada: para
+      if (e?.token) { if (avisou) bg({ tipo: 'dfOk' }).catch(() => {}); return true; }
       if (!avisou && Date.now() - t0 > 15e3) { avisou = true; bg({ tipo: 'dfVerificacao' }).catch(() => {}); }
+      if (Date.now() - ultimo > 60e3) { ultimo = Date.now(); bg({ tipo: 'dfRodando' }).catch(() => {}); }
       await dorme(1000);
     }
     return false;
