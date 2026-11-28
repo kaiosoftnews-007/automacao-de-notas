@@ -1,8 +1,7 @@
 {
-  "versao": "3.13.14",
+  "versao": "3.13.15",
   "mudancas": [
-    "DF: pede tudo primeiro (todas as empresas, NF-e e NFC-e, Emitente e Destinatário) e não fica esperando o DF liberar.",
-    "DF: confere e baixa o que ficou pronto a cada 10 minutos (dá F5 sozinho na aba).",
-    "Painel: a linha do DF mostra o que aconteceu com cada modelo (ex.: \"NFC-e: DF sem notas no período\")."
+    "DF: quando o DF recusa o código da Cloudflare, o robô pede de novo com código novo (não conta como tentativa).",
+    "DF: antes de cada volta, o que ficou com erro temporário volta para a fila e é pedido de novo (até 3 vezes). Falta de procuração e certificado recusado continuam como erro."
   ]
 }

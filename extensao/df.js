@@ -66,7 +66,16 @@
   }
 
   // 3.13.7: relê a fila depois de cada rodada, para pegar empresas escolhidas no painel enquanto a volta já rodava.
+  // 3.13.15: erros definitivos (sem procuração / certificado recusado) ficam; o resto volta para a fila (até 3 revisões).
+  const definitivo = m => /procura[çc][ãa]o|credenciais inv/i.test(m || '');
+  async function revisarErros() {
+    for (const it of ((await bg({ tipo: 'dfItens' })) || []).filter(i => i.estado === 'erro' && !definitivo(i.msg) && (i.rev || 0) < 3)) {
+      await bg({ tipo: 'dfMarcar', id: it.id, patch: { estado: 'a_solicitar', tent: 0, rev: (it.rev || 0) + 1, msg: 'Pedindo de novo (erro anterior: ' + String(it.msg || '').slice(0, 120) + ')' } }).catch(() => {});
+    }
+  }
+
   async function solicitarTodos() {
+    await revisarErros();
     for (let rodada = 0; rodada < 4; rodada++) {
       const pend = ((await bg({ tipo: 'dfItens' })) || []).filter(i => i.estado === 'a_solicitar');
       if (!pend.length) return;
@@ -88,6 +97,8 @@
         await bg({ tipo: 'dfMarcar', id: it.id, patch: { msg: 'Fila do DF cheia: peço de novo quando liberar espaço.' } });
         await pag('resetCaptcha'); return false;
       }
+      // 3.13.15: recusa por causa do código da Cloudflare não conta como tentativa; pede de novo com código novo.
+      else if (/captcha|cloudflare|turnstile|verifica[çc][ãa]o humana|token/i.test(msg)) patch = { msg: 'A Cloudflare recusou o código; pedindo de novo.' };
       else if (/permiss/i.test(msg)) patch = { estado: 'erro', msg: 'O certificado do escritório não tem procuração para esta empresa no DF (precisa do certificado próprio).' };
       else if (/credenciais/i.test(msg)) patch = { estado: 'erro', msg: 'O DF recusou o certificado (credenciais inválidas).' };
       else if (tent < 3) patch = { tent, msg: 'Tentativa ' + tent + ': ' + msg };
