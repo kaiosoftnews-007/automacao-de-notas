@@ -5,7 +5,9 @@ argument-hint: <tarefa>
 
 Tarefa: $ARGUMENTS
 
-Divisão de modelos para esta tarefa:
+Esta divisão vale para TODA a conversa a partir de agora, em todas as mensagens seguintes, até o usuário dizer "modo normal". Não precisa ser repetida.
+
+Divisão de modelos:
 
 1. **Plano (Opus):** se ainda não estiver em modo de plano, use EnterPlanMode. Apresente um plano curto e objetivo e espere aprovação.
 2. **Execução (Sonnet):** depois de aprovado, você mesmo faz as edições e roda os comandos.
