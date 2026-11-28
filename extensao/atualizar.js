@@ -50,24 +50,46 @@ async function pastaEhDaExtensao(handle) {
   } catch { return false; }
 }
 
-async function temPermissao(handle) {
+// 3.13.10: nada aqui pode ficar esperando para sempre (a página travava em "Conferindo a pasta…").
+const PRAZO_PERMISSAO = 15000;
+const PRAZO_BUSCA = 20000;
+const MSG_PERMISSAO = 'O Chrome não respondeu ao pedido de permissão da pasta. Procure o aviso do Chrome (pode estar atrás desta janela ou na barra de endereço) e clique em "Permitir"/"Editar arquivos". Se não aparecer, clique em "Escolher outra pasta".';
+
+function comPrazo(promessa, ms, msg) {
+  let t;
+  return Promise.race([
+    promessa,
+    new Promise((_, falha) => { t = setTimeout(() => falha(new Error(msg)), ms); }),
+  ]).finally(() => clearTimeout(t));
+}
+
+async function pedirPermissao(handle) {
   const opc = { mode: 'readwrite' };
   if ((await handle.queryPermission(opc)) === 'granted') return true;
-  return (await handle.requestPermission(opc)) === 'granted';
+  status('Aguardando você permitir o acesso à pasta no aviso do Chrome…');
+  return (await comPrazo(handle.requestPermission(opc), PRAZO_PERMISSAO, MSG_PERMISSAO)) === 'granted';
 }
+
+// Pastas que nunca são a da extensão e deixam a busca lenta.
+const PULAR = new Set(['node_modules', '.git', 'windows', 'appdata', 'program files', 'program files (x86)', '$recycle.bin', 'system volume information']);
 
 // Procura a pasta da extensão na escolhida ou nas de dentro (até 3 níveis),
 // porque o zip extraído costuma criar pastas uma dentro da outra.
-async function acharPastaDaExtensao(handle, nivel = 0) {
+async function acharPastaDaExtensao(handle, nivel = 0, limite = Date.now() + PRAZO_BUSCA) {
+  if (Date.now() > limite) throw new Error('A pasta escolhida é grande demais para procurar. Escolha direto a pasta que aparece em "Carregado de" em chrome://extensions (a que tem o manifest.json).');
+  status(`Procurando o manifest.json em "${handle.name}"…`);
   if (await pastaEhDaExtensao(handle)) return handle;
   if (nivel >= 3) return null;
   try {
     for await (const item of handle.values()) {
-      if (item.kind !== 'directory') continue;
-      const achou = await acharPastaDaExtensao(item, nivel + 1);
+      if (item.kind !== 'directory' || PULAR.has(item.name.toLowerCase())) continue;
+      const achou = await acharPastaDaExtensao(item, nivel + 1, limite);
       if (achou) return achou;
     }
-  } catch { /* sem acesso a alguma subpasta: ignora */ }
+  } catch (e) {
+    if (e && /grande demais/.test(e.message)) throw e;
+    /* sem acesso a alguma subpasta: ignora */
+  }
   return null;
 }
 
@@ -86,8 +108,7 @@ async function escolherPasta() {
   if (!handle) {
     throw new Error('Não achei o manifest.json da Automação de Notas em "' + escolhida.name + '" nem nas pastas de dentro. Escolha a pasta que aparece em "Carregado de" em chrome://extensions.');
   }
-  if ((await handle.queryPermission({ mode: 'readwrite' })) !== 'granted' &&
-      (await handle.requestPermission({ mode: 'readwrite' })) !== 'granted') {
+  if (!(await pedirPermissao(handle))) {
     throw new Error('O Chrome não deu permissão para gravar nessa pasta. Tente de novo e clique em "Editar arquivos".');
   }
   await guardarPasta(handle);
@@ -98,9 +119,15 @@ async function obterPasta(forcarNova) {
   if (!forcarNova) {
     const guardada = await lerPastaGuardada();
     if (guardada) {
+      let ok = false;
       try {
-        if ((await temPermissao(guardada)) && (await pastaEhDaExtensao(guardada))) return guardada;
-      } catch { /* cai para pedir a pasta */ }
+        ok = (await pedirPermissao(guardada)) && (await pastaEhDaExtensao(guardada));
+      } catch (e) {
+        // Prazo estourado: o clique já "passou", então não dá para abrir a escolha de pasta daqui.
+        if (e && e.message === MSG_PERMISSAO) throw e;
+      }
+      if (ok) return guardada;
+      status('A pasta guardada não serve mais; escolha a pasta da extensão…');
     }
   }
   return escolherPasta();

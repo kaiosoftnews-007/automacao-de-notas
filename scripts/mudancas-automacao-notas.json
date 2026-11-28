@@ -1,4 +1,4 @@
 [
-  "DF: a conferência automática de 5 em 5 minutos não disparava; corrigido.",
-  "DF: depois de pedir as empresas, confere de minuto em minuto (até 3 vezes) se já ficaram prontas e baixa, sem precisar de F5."
+  "Atualizar: a página não fica mais parada em \"Conferindo a pasta da extensão…\"; se o Chrome não responder em 15 s, avisa o que fazer.",
+  "Atualizar: mostra em qual pasta está procurando e para se a pasta escolhida for grande demais."
 ]
