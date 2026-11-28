@@ -360,6 +360,15 @@
     try {
       st = await ler(); montar(); desenhar();
       if (!st?.rodando) return;
+      // 3.13.16: parada pelo painel (botão "Parar"): confere a cada 20 s.
+      if (st.execucao_id && Date.now() - (st.confParada || 0) > 20e3) {
+        st.confParada = Date.now();
+        const ex = await bg({ tipo: 'api', caminho: `execucoes?select=status&id=eq.${st.execucao_id}` }).catch(() => null);
+        if (ex?.[0] && ['falhou', 'concluida', 'com_erros'].includes(ex[0].status)) {
+          st.rodando = false; await gravar(st); desenhar();
+          return dizer('Parado pelo painel. O que já foi baixado continua na pasta.');
+        }
+      }
       if (/requer nova autentica/i.test(texto())) return dizer('A Sefaz pediu a senha de novo. Digite, autentique e abra "Baixar XML NFE" — eu continuo de onde parei.');
       if (st.fase === 'historico') return await historico();
 

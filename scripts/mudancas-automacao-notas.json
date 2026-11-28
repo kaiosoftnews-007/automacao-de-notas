@@ -1,4 +1,4 @@
 [
-  "DF: quando o DF recusa o código da Cloudflare, o robô pede de novo com código novo (não conta como tentativa).",
-  "DF: antes de cada volta, o que ficou com erro temporário volta para a fila e é pedido de novo (até 3 vezes). Falta de procuração e certificado recusado continuam como erro."
+  "Painel: botão \"Parar\" na Última execução da Rotina automática.",
+  "Sefaz GO: a extensão confere a cada 20 s se a execução foi parada no painel e para sozinha (o que já baixou fica na pasta)."
 ]

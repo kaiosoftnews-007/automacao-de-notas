@@ -1577,7 +1577,7 @@ async function telaRotina(id) {
       </section>
     </form>
     <section class="card tbl-wrap">
-      <div class="pad" style="padding-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h2>Última execução</h2>${ult ? `<span class="pill ${EXE[ult.status][0]}">${EXE[ult.status][1]}</span><span class="sub">${ult.origem === 'manual' ? 'Pedida manualmente' : 'Agendada'} · ${quando(ult.solicitada_em)}</span>` : ''}</div>
+      <div class="pad" style="padding-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h2>Última execução</h2>${ult ? `<span class="pill ${EXE[ult.status][0]}">${EXE[ult.status][1]}</span><span class="sub">${ult.origem === 'manual' ? 'Pedida manualmente' : 'Agendada'} · ${quando(ult.solicitada_em)}</span>${['pendente', 'aguardando_pc', 'rodando'].includes(ult.status) ? '<button type="button" class="btn del" id="parar" style="margin-left:auto">Parar</button>' : ''}` : ''}</div>
       ${dls.length ? `<table class="tbl"><thead><tr><th>Empresa</th><th>IE</th><th>Tipo</th><th class="c">Notas</th><th>Situação</th><th>Detalhe</th></tr></thead><tbody>
         ${dls.map(d => `<tr><td style="font-weight:600">${h(d.empresas?.razao_social)}</td><td>${h(d.empresas?.ie)}</td><td>${d.tipo === 'entrada' ? 'Entrada' : 'Saída'}</td><td class="c">${d.qtd_notas ?? '—'}</td><td><span class="pill ${ST_DL[d.status][0]}">${ST_DL[d.status][1]}</span></td><td class="sub">${h(d.mensagem || d.arquivo || '')}</td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">${!ult ? 'Nenhuma execução ainda.' : ult.status === 'aguardando_pc' ? `O ${h(nomePc || 'computador escolhido')} pega o pedido em até 1 minuto e baixa em segundo plano. As notas ficam salvas nele.` : 'Aguardando o robô começar.'}</div>`}
@@ -1620,6 +1620,15 @@ async function telaRotina(id) {
   if ($('#pc')) $('#pc').addEventListener('change', proxima);
   mostrarFreq();
   $('#agora').onclick = async () => { await pedirExecucao(id); telaRotina(id); };
+  // 3.13.16: parar a execução. A extensão confere a cada 20 s e para sozinha; o que já baixou fica.
+  if ($('#parar')) $('#parar').onclick = async () => {
+    if (!(await confirmar('Parar esta execução?', 'O computador para de pedir notas em até 20 segundos. O que já foi baixado continua na pasta.', 'Parar'))) return;
+    try {
+      await q(sb.from('execucoes').update({ status: 'falhou', finalizada_em: new Date().toISOString() }).eq('id', ult.id));
+      await sb.from('downloads').update({ status: 'erro', mensagem: 'Parada pelo painel' }).eq('execucao_id', ult.id).in('status', ['fila', 'processando']);
+    } catch (e) { alert('Não consegui parar: ' + (e.message || e)); return; }
+    limparCache(); telaRotina(id);
+  };
   $('#f').onsubmit = async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
