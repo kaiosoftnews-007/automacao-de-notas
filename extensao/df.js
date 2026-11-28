@@ -54,8 +54,14 @@
     while (Date.now() - t0 < 8 * 3600e3 && falhas < 30) {
       const e = await pag('estado').catch(() => null);
       if (!e) falhas++; else falhas = 0;   // extensão recarregada/aba fechada: para
-      if (e?.token && e.token !== usado) { usado = e.token; if (avisou || travou) bg({ tipo: 'dfOk' }).catch(() => {}); return true; }
+      if (e?.token && e.token !== usado) { usado = e.token; sessionStorage.removeItem('anDfF5'); if (avisou || travou) bg({ tipo: 'dfOk' }).catch(() => {}); return true; }
       if (e?.token && e.token === usado && Date.now() - renovou > (renovou === t0 ? 10e3 : 20e3)) { renovou = Date.now(); await pag('renovar').catch(() => {}); }
+      // 3.13.13: já fez pedido e a caixinha não gera código novo em 30 s → dá F5 sozinho (até 3 seguidos).
+      // Depois do F5 a volta recomeça e só pede o que ainda falta.
+      if (usado && Date.now() - t0 > 30e3) {
+        const n = +(sessionStorage.getItem('anDfF5') || 0);
+        if (n < 3) { sessionStorage.setItem('anDfF5', String(n + 1)); await bg({ tipo: 'dfRodando' }).catch(() => {}); location.reload(); return new Promise(() => {}); }
+      }
       if (!travou && Date.now() - t0 > 120e3) { travou = true; bg({ tipo: 'dfTravou' }).catch(() => {}); }
       else if (!avisou && Date.now() - t0 > 15e3) { avisou = true; bg({ tipo: 'dfVerificacao' }).catch(() => {}); }
       if (Date.now() - ultimo > 60e3) { ultimo = Date.now(); bg({ tipo: 'dfRodando' }).catch(() => {}); }

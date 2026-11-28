@@ -1,5 +1,4 @@
 [
-  "DF: depois do primeiro pedido, o robô parava com a caixinha da Cloudflare verde; agora pede um código novo sozinho e continua.",
-  "DF: se mesmo assim travar por 2 minutos, aparece o aviso vermelho no painel dizendo o que fazer.",
-  "Painel: a tela se atualiza sozinha (a cada 10 s durante downloads), sem precisar de F5."
+  "DF: se a caixinha da Cloudflare não gerar código novo em 30 s, o robô dá F5 sozinho na aba do Agênci@Net e continua (até 3 vezes seguidas).",
+  "DF: só se os 3 F5 não resolverem aparece o aviso vermelho no painel."
 ]
